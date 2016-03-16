@@ -1,0 +1,13 @@
+This directory contains code for binary solidification using the
+Kim-Kim-Suzuki model [1] for interfacial energy. This allows easy specification
+of gamma, but requires constant chemical potential through the interface.
+The implementation involves iteratively solving for chemical composition in
+pure phases such that the chemical potential constraint is satisfied [2].
+
+Questions/comments to trevor.keller@nist.gov (Trevor Keller)
+
+References:
+[1] Kim, Kim, and Suzuki. "Phase-field model for binary alloys."
+    Physical Review E 60:6;7186-7197 (1999).
+[2] Provatas and Elder. _Phase-Field Methods in Materials Science and Engineering_,
+    Chapter 6, Section 9. Wiley VCH: Weinheim, Germany. 2010.
