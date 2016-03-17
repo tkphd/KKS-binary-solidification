@@ -53,6 +53,23 @@ void generate(int dim, const char* filename)
 				initGrid(n)[1] = cBl;
 			}
 		}
+		unsigned int nTot = nSol+nLiq;
+		#ifdef MPI_VERSION
+		unsigned int mySol(nSol), myLiq(nLiq), myTot(nTot);
+		MPI::COMM_WORLD.Allreduce(&mySol, &nSol, 1, MPI_UNSIGNED, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myLiq, &nLiq, 1, MPI_UNSIGNED, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myTot, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
+		#endif
+		double C0 = (double(nLiq)*cBs + double(nSol)*cBl) / double(nSol+nLiq); // weighted average of solid + liquid
+		assert(C0>0.);
+		if (rank==0)
+			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
+
+		for (int n=0; n<nodes(initGrid); n++) {
+			initGrid(n)[0] = C0;
+			initGrid(n)[1] = C0;
+		}
+
 		output(initGrid,filename);
 	} else if (dim==2) {
 		int L=256;
@@ -71,6 +88,23 @@ void generate(int dim, const char* filename)
 				initGrid(n)[1] = cBl;
 			}
 		}
+		unsigned int nTot = nSol+nLiq;
+		#ifdef MPI_VERSION
+		unsigned int mySol(nSol), myLiq(nLiq), myTot(nTot);
+		MPI::COMM_WORLD.Allreduce(&mySol, &nSol, 1, MPI_UNSIGNED, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myLiq, &nLiq, 1, MPI_UNSIGNED, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myTot, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
+		#endif
+		double C0 = (double(nLiq)*cBs + double(nSol)*cBl) / double(nSol+nLiq); // weighted average of solid + liquid
+		assert(C0>0.);
+		if (rank==0)
+			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
+
+		for (int n=0; n<nodes(initGrid); n++) {
+			initGrid(n)[0] = C0;
+			initGrid(n)[1] = C0;
+		}
+
 		output(initGrid,filename);
 	} else if (dim==3) {
 		int L=64;
@@ -89,20 +123,28 @@ void generate(int dim, const char* filename)
 				initGrid(n)[1] = cBl;
 			}
 		}
+		unsigned int nTot = nSol+nLiq;
+		#ifdef MPI_VERSION
+		unsigned int mySol(nSol), myLiq(nLiq), myTot(nTot);
+		MPI::COMM_WORLD.Allreduce(&mySol, &nSol, 1, MPI_UNSIGNED, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myLiq, &nLiq, 1, MPI_UNSIGNED, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myTot, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
+		#endif
+		double C0 = (double(nLiq)*cBs + double(nSol)*cBl) / double(nSol+nLiq); // weighted average of solid + liquid
+		assert(C0>0.);
+		if (rank==0)
+			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
+
+		for (int n=0; n<nodes(initGrid); n++) {
+			initGrid(n)[0] = C0;
+			initGrid(n)[1] = C0;
+		}
+
 		output(initGrid,filename);
 	} else {
 		std::cerr<<"ERROR: "<<dim<<"-dimensional domains not supported."<<std::endl;
 		exit(-1);
 	}
-	unsigned int nTot = nSol+nLiq;
-	#ifdef MPI_VERSION
-	unsigned int mySol(nSol), myLiq(nLiq), myTot(nTot);
-	MPI::COMM_WORLD.Allreduce(&mySol, &nSol, 1, MPI_UNSIGNED, MPI_SUM);
-	MPI::COMM_WORLD.Allreduce(&myLiq, &nLiq, 1, MPI_UNSIGNED, MPI_SUM);
-	MPI::COMM_WORLD.Allreduce(&myTot, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
-	#endif
-	if (rank==0)
-		std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
 
 	/* Generate Cs,Cl look-up table (LUT) using Newton-Raphson method, outlined in Provatas' Appendix C3
 	 * Store results in pureconc, which contains two fields:
@@ -111,9 +153,7 @@ void generate(int dim, const char* filename)
 	 *
 	 * The grid is discretized over phi (axis 0) and c (axis 1).
 	*/
-	double C0 = (double(nLiq)*cBs + double(nSol)*cBl) / double(nSol+nLiq); // weighted average of solid + liquid
-	assert(C0>0.);
-	int LUTres[2] = {100, 100};
+	int LUTres[2] = {10, 10};
 	LUTGRID pureconc(2,0,LUTres[0],0,LUTres[1]);
 	double dp = 1.0/LUTres[0];
 	double dc = 1.0/LUTres[1];
@@ -122,8 +162,16 @@ void generate(int dim, const char* filename)
 
 	for (int n=0; n<nodes(pureconc); n++) {
 		vector<int> x = position(pureconc,n);
+		if (n==0) {
+			pureconc(n)[0] = cBs;
+			pureconc(n)[1] = cBl;
+		} else {
+			pureconc(n)[0] = pureconc(n-1)[0];
+			pureconc(n)[1] = pureconc(n-1)[1];
+		}
 		iterateConc(dp*double(x[0]), dc*double(x[1]), pureconc(n)[0], pureconc(n)[1]);
 	}
+
 	output(pureconc,"consistentC.lut");
 }
 
@@ -257,16 +305,29 @@ template<class T> void iterateConc(const T p, const T c, T& Cs, T& Cl)
 		// copy current values as "old guesses"
 		double Cso = Cs;
 		double Clo = Cl;
-		double invW = 1.0 / ( h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso) );
+		double invW = h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso);
+		if (fabs(invW) > 1.0e-12) invW = 1.0/invW;
 		double f1 = h(p)*Cso + (1.0-h(p))*Clo - c;
 		double f2 = dfs_dc(Cso) - dfl_dc(Clo);
+		double ds = invW*(d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2);
+		double dl = -invW*(d2fs_dc2(Cso)*f1 - h(p)*f2);
 
-		Cs = Cso + invW*(d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2);
-		Cl = Clo - invW*(d2fs_dc2(Cso)*f1 - h(p)*f2);
+		Cs = Cso + ds;
+		Cl = Clo + dl;
 
-		res = std::sqrt(pow(Cs-Cso,2.0) + pow(Cl-Clo,2.0));
+		invW = 1.0 / ( h(p)*d2fl_dc2(Cl) + (1.0-h(p))*d2fs_dc2(Cs) );
+		f1 = h(p)*Cs + (1.0-h(p))*Cl - c;
+		f2 = dfs_dc(Cs) - dfl_dc(Cl);
+		ds = invW*(d2fl_dc2(Cl)*f1 + (1.0-h(p))*f2);
+		dl = -invW*(d2fs_dc2(Cs)*f1 - h(p)*f2);
+
+		res = std::sqrt(pow(dl,2.0) + pow(ds,2.0));
 		l++;
 	}
+	l++;
+	//if (l>=maxloops)
+		printf("(%.2f, %.2f): %u iters, res=%.2e\n", p, c, l, res);
+		//std::cout<<"("<<p<<','<<c<<"): "<<l<<" iters, res="<<res<<"."<<std::endl;
 }
 
 #endif
