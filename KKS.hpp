@@ -20,7 +20,7 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
 /* Given const phase fraction (p) and concentration (c), iteratively determine
  * the solid (Cs) and liquid (Cl) fictitious concentrations that satisfy the
  * equal chemical potential constraint. Pass p and c by const value,
- * Cs and Cl by non-const reference to update in place. This allows use ofthis
+ * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
 template<class T> void iterateConc(const T p, const T c, T& Cs, T& Cl);
@@ -30,19 +30,19 @@ double hprime(const double& p){return 1.0;                      }
 double g(const double& p)     {return pow(p,2.0)*pow(1.0-p,2.0);}
 double gprime(const double& p){return p*(2.0*p-1.0)*(p-1.0);    }
 
-double fl(const double& c); // ideal solution model for liquid free energy density
+double fl(const double& c);       // ideal solution model for liquid free energy density
 
-double fs(const double& c); // ideal solution model for solid free energy density
+double fs(const double& c);       // ideal solution model for solid free energy density
 
-double k();                 // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
+double dfl_dc(const double& c);   // first derivative of fl w.r.t. c
 
-double dfl_dc(const double& c); // first derivative of fl w.r.t. c
-
-double dfs_dc(const double& c); // first derivative of fs w.r.t. c
+double dfs_dc(const double& c);   // first derivative of fs w.r.t. c
 
 double d2fl_dc2(const double& c); // second derivative of fl w.r.t. c
 
 double d2fs_dc2(const double& c); // second derivative of fs w.r.t. c
+
+double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
 
 double f(const double& p, const double& c, const double& Cs, const double& Cl); // free energy density
 
