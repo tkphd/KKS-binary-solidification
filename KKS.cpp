@@ -10,14 +10,21 @@
 
 // Note: KKS.hpp contains important declarations and comments. Have a look.
 
-const double fA = 1.0;      // equilibrium free energy of pure liquid A
-const double fB = 2.5;      // equilibrium free energy of pure liquid B
-const double R = 8.314e-3;  // J/cm3-K
-const double T = 373.15;    // Isothermal.
+// Ideal solution model parameters
+//#define IDEAL            // uncomment this line to switch ON the ideal solution model
+const double fA = 1.0;     // equilibrium free energy of pure liquid A
+const double fB = 2.5;     // equilibrium free energy of pure liquid B
+const double T = 0.4;      // homologous, isothermal
+const double RT = 8.314*T; // units?
+
+// Parabolic model parameters
+const double Cse = 0.75, Cle = 0.25; // equilibrium concentration
+const double As = 15.0,  Al = 15.0;  // 2*curvature of parabola
+const double Ds = 3.0,   Dl = 15.0;  // y-axis offset
 
 const unsigned int maxloops = 1e6;// ceiling to kill infinite loops in iterative scheme
-const double tol = 1.0e-8; // tolerance for Cs, Cl scheme to satisfy equal chemical potential
-const double epsilon = 1.0e-6; // what to consider zero to avoid log(c) explosions
+const double tol = 7.5e-3; // tolerance for Cs, Cl scheme to satisfy equal chemical potential
+const double epsilon = 1.0e-8; // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
 
@@ -27,14 +34,15 @@ void generate(int dim, const char* filename)
 	#ifdef MPI_VERSION
 	rank=MPI::COMM_WORLD.Get_rank();
 	#endif
+	srand(time(NULL)+rank);
 	/* Grid contains four fields:
 	 * 0. phi, phase fraction solid. Phi=1 means Solid.
 	 * 1. c, concentration of component A
 	 * 2. Cs, fictitious composition of solid
 	 * 3. Cl, fictitious composition of liquid
 	 */
-	const double cBs = 0.45; // initial solid concentration
-	const double cBl = 0.65; // initial liquid concentration
+	const double cBs = 0.65; // initial solid concentration
+	const double cBl = 0.45; // initial liquid concentration
 
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
@@ -154,17 +162,18 @@ void generate(int dim, const char* filename)
 	 *
 	 * The grid is discretized over phi (axis 0) and c (axis 1).
 	*/
-	int LUTres[2] = {4, 4};
+	int LUTres[2] = {1024, 1024};
 	LUTGRID pureconc(2,0,1+LUTres[0],0,1+LUTres[1]);
 	double dp = 1.0/LUTres[0];
 	double dc = 1.0/LUTres[1];
 	dx(pureconc,0) = dp; // different resolution in phi
 	dx(pureconc,1) = dc; // and c is not unreasonable
+	printf("Equilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(fA, fB, RT), Cl_e(fA, fB, RT));
 
 	for (int n=0; n<nodes(pureconc); n++) {
 		vector<int> x = position(pureconc,n);
-		pureconc(n)[0] = double(rand())/RAND_MAX; //dc*double(x[1]); //(cBl + dc*double(x[1]))/2.0;
-		pureconc(n)[1] = double(rand())/RAND_MAX; //dc*double(x[1]); //(cBs + dc*double(x[1]))/2.0;
+		pureconc(n)[0] = dc*double(x[1]);// + double(rand())/RAND_MAX)/2.0;
+		pureconc(n)[1] = dc*double(x[1]);// + double(rand())/RAND_MAX)/2.0;
 		iterateConc(dp*double(x[0]), dc*double(x[1]), pureconc(n)[0], pureconc(n)[1]);
 	}
 
@@ -213,59 +222,108 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 } // namespace MMSP
 
-
 double fl(const double& c)
 {
+	#ifdef IDEAL
 	// ideal solution model for liquid free energy
 	if (c < epsilon)
 		return fA;
 	else if (1.0-c < epsilon)
 		return fB;
-	return (1.0-c)*fA + c*fB + R*T*((1.0-c)*log(1.0-c) + c*log(c));
+	return (1.0-c)*fA + c*fB + RT*((1.0-c)*log(1.0-c) + c*log(c));
+	#else
+	return Al*pow(c-Cle,2.0)+Dl;
+	#endif
 }
 
 double fs(const double& c)
 {
+	#ifdef IDEAL
 	// ideal solution model for solid free energy, transformed from liquid
 	double delta = -0.25; // negative solidifies, positive melts
 	if (c < epsilon)
 		return fB+delta;
 	else if (1.0-c < epsilon)
 		return fA+delta;
-	return c*(fA+delta) + (1.0-c)*(fB+delta) + R*T*(c*log(c) + (1.0-c)*log(1.0-c));
+	return delta + c*fA + (1.0-c)*fB + RT*(c*log(c) + (1.0-c)*log(1.0-c));
+	#else
+	return As*pow(c-Cse,2.0)+Ds;
+	#endif
 }
+
 
 double dfl_dc(const double& c)
 {
+	#ifdef IDEAL
 	if (std::min(c,1.0-c) < epsilon)
 		return fB-fA;
-	return fB - fA + R*T*(log(1.0-c) - log(c));
+	return fB - fA + RT*(log(1.0-c) - log(c));
+	#else
+	return 2.0*Al*(c-Cle);
+	#endif
 }
 
 double dfs_dc(const double& c)
 {
+	#ifdef IDEAL
 	if (std::min(c,1.0-c) < epsilon)
 		return fA-fB;
-	return fA - fB + R*T*(log(1.0-c) - log(c));
+	return fA - fB + RT*(log(1.0-c) - log(c));
+	#else
+	return 2.0*As*(c-Cse);
+	#endif
 }
 
 double d2fl_dc2(const double& c)
 {
-	return R*T/(c*(1.0-c));
+	#ifdef IDEAL
+	return RT/(c*(1.0-c));
+	#else
+	return 2.0*Al;
+	#endif
 }
 
 double d2fs_dc2(const double& c)
 {
-	return R*T/(c*(1.0-c));
+	#ifdef IDEAL
+	return RT/(c*(1.0-c));
+	#else
+	return 2.0*As;
+	#endif
+}
+
+double R(const double& p, const double& Cs, const double& Cl)
+{
+	// denominator for dCs, dCl, df
+	return h(p)*d2fl_dc2(Cl) + (1.0-h(p))*d2fs_dc2(Cs);
+}
+
+double dCl_dc(const double& p, const double& Cs, const double& Cl)
+{
+	double invR = R(p, Cs, Cl);
+	if (invR>epsilon) invR = 1.0/invR;
+	return d2fl_dc2(Cl)*invR;
+}
+
+double dCs_dc(const double& p, const double& Cs, const double& Cl)
+{
+	double invR = R(p, Cs, Cl);
+	if (invR>epsilon) invR = 1.0/invR;
+	return d2fs_dc2(Cs)*invR;
+}
+
+double Cl_e(const double& fa, const double& fb, const double& rt) {
+	return 1.0 / (1.0 + std::exp((fa-fb)/(rt)));
+}
+
+double Cs_e(const double& fa, const double& fb, const double& rt) {
+	return std::exp((fb-fa)/(rt)) / (1.0 + std::exp((fb-fa)/(rt)));
 }
 
 double k()
 {
 	// Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
-	double Cl_e = 1.0 / (1.0 + std::exp((fA-fB)/(R*T)));
-	double Cs_e = std::exp((fB-fA)/(R*T)) / (1.0 + std::exp((fB-fA)/(R*T)));
-
-	return Cs_e / Cl_e;
+	return Cs_e(fA, fB, RT) / Cl_e(fA, fB, RT);
 }
 
 double f(const double& p, const double& c, const double& Cs, const double& Cl)
@@ -276,8 +334,9 @@ double f(const double& p, const double& c, const double& Cs, const double& Cl)
 
 double d2f_dc2(const double& p, const double& c, const double& Cs, const double& Cl)
 {
-	double R = h(p)*d2fl_dc2(Cl) + (1.0-h(p))*d2fs_dc2(Cs);
-	return d2fl_dc2(Cl)*d2fs_dc2(Cs)/R;
+	double invR = R(p, Cs, Cl);
+	if (invR>epsilon) invR = 1.0/invR;
+	return d2fl_dc2(Cl)*d2fs_dc2(Cs)*invR;
 }
 
 /* Given const phase fraction (p) and concentration (c), iteratively determine
@@ -288,21 +347,21 @@ double d2f_dc2(const double& p, const double& c, const double& Cs, const double&
  */
 template<class T> void iterateConc(const T p, const T c, T& Cs, T& Cl)
 {
-	const double epsilon=1.0e-12;
-	double res = 1.0; // residual for Newton-Raphson scheme
+	double res = 1.0e3; // residual for Newton-Raphson scheme
 
 	// Iterate until either the matrix is solved (residual<tolerance)
 	// or patience wears out (loop>maxloops, likely due to infinite loop).
 	unsigned int l=0;
 	while (l<maxloops && res>tol) {
 		// copy current values as "old guesses"
-		double Cso = Cs;
-		double Clo = Cl;
+		T Cso = Cs;
+		T Clo = Cl;
 		double W = h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso);
 		double f1 = h(p)*Cso + (1.0-h(p))*Clo - c;
 		double f2 = dfs_dc(Cso) - dfl_dc(Clo);
-		double ds = (W<epsilon)?0.0:( d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2)/W;
-		double dl = (W<epsilon)?0.0:(-d2fs_dc2(Cso)*f1 + h(p)*f2)/W;
+		//double f2 = dfs_dc(Cso)*dCs_dc(p, Cso, Clo) - dfl_dc(Clo)*dCl_dc(p, Cso, Clo);
+		T ds = (W<epsilon)? 0.0: ( d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2)/W;
+		T dl = (W<epsilon)? 0.0: (-d2fs_dc2(Cso)*f1 + h(p)*f2)/W;
 
 		Cs = Cso + ds;
 		Cl = Clo + dl;
@@ -314,15 +373,11 @@ template<class T> void iterateConc(const T p, const T c, T& Cs, T& Cl)
 		res = std::sqrt(pow(Cs-Cso,2.0) + pow(Cl-Clo,2.0));
 
 		/*
-		invW = h(p)*d2fl_dc2(Cl) + (1.0-h(p))*d2fs_dc2(Cs);
-		if (fabs(invW) > 1.0e-9) invW = 1.0/invW;
-		f1 = h(p)*Cs + (1.0-h(p))*Cl - c;
-		f2 = dfs_dc(Cs) - dfl_dc(Cl);
-		ds = invW*( d2fl_dc2(Cl)*f1 + (1.0-h(p))*f2);
-		dl = invW*(-d2fs_dc2(Cs)*f1 + h(p)*f2);
-
-		res = std::sqrt(pow(dl,2.0) + pow(ds,2.0));
+		f1 = h(p)*Cs + (1.0-h(p))*Cl - c; // at convergence, this equals zero
+		f2 = dfs_dc(Cs) - dfl_dc(Cl);     // this, too
+		res = std::sqrt(pow(f1,2.0) + pow(f2,2.0));
 		*/
+
 		l++;
 		//printf("p=%.2f, c=%.2f, iter=%-8u: Cs=%.3f, Cl=%.3f, res=%.2e\n", p, c, l, Cs, Cl, res);
 	}

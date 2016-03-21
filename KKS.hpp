@@ -42,8 +42,18 @@ double d2fl_dc2(const double& c); // second derivative of fl w.r.t. c
 
 double d2fs_dc2(const double& c); // second derivative of fs w.r.t. c
 
-double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
+double R(const double& p, const double& Cs, const double& Cl); // denominator for dCs, dCl, df
+
+double dCl_dc(const double& p, const double& Cs, const double& Cl); // first derivative of Cl w.r.t. c
+
+double dCs_dc(const double& p, const double& Cs, const double& Cl); // first derivative of Cs w.r.t. c
 
 double f(const double& p, const double& c, const double& Cs, const double& Cl); // free energy density
 
 double d2f_dc2(const double& p, const double& c, const double& Cs, const double& Cl); // second derivative of f w.r.t. c
+
+double Cl_e(const double& fa, const double& fb, const double& rt); // equilbrium Cl
+
+double Cs_e(const double& fa, const double& fb, const double& rt); // equilbrium Cs
+
+double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
