@@ -23,12 +23,12 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-template<class T> void iterateConc(const T p, const T c, T& Cs, T& Cl);
+template<class T> double iterateConc(const double tol, const unsigned int maxloops, const T p, const T c, T& Cs, T& Cl);
 
-double h(const double& p)     {return p;                        }
-double hprime(const double& p){return 1.0;                      }
-double g(const double& p)     {return pow(p,2.0)*pow(1.0-p,2.0);}
-double gprime(const double& p){return p*(2.0*p-1.0)*(p-1.0);    }
+double h(const double& p)     {return pow(p,3.0) * (6.0*pow(p,2.0)-15.0*p+10.0);                            }
+double hprime(const double& p){return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }
+double g(const double& p)     {return pow(p,2.0) * pow(1.0-p,2.0);}
+double gprime(const double& p){return 2.0*p * (2.0*p-1.0)*(p-1.0);    }
 
 double fl(const double& c);       // ideal solution model for liquid free energy density
 
@@ -57,3 +57,6 @@ double Cl_e(const double& fa, const double& fb, const double& rt); // equilbrium
 double Cs_e(const double& fa, const double& fb, const double& rt); // equilbrium Cs
 
 double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
+
+void print_energy(); // exports free energy curves to energy.csv
+

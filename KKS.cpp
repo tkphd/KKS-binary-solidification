@@ -18,13 +18,19 @@ const double T = 0.4;      // homologous, isothermal
 const double RT = 8.314*T; // units?
 
 // Parabolic model parameters
-const double Cse = 0.75, Cle = 0.25; // equilibrium concentration
-const double As = 15.0,  Al = 15.0;  // 2*curvature of parabola
-const double Ds = 3.0,   Dl = 15.0;  // y-axis offset
+const double Cse = 0.75, Cle = 0.25;// equilibrium concentration
+const double As = 8.0,  Al = 8.0;// 2*curvature of parabola
+const double Ds = 4.0,   Dl = 16.0; // y-axis offset
+const double omega = 8.0;           // double well height
 
-const unsigned int maxloops = 1e6;// ceiling to kill infinite loops in iterative scheme
-const double tol = 7.5e-3; // tolerance for Cs, Cl scheme to satisfy equal chemical potential
-const double epsilon = 1.0e-8; // what to consider zero to avoid log(c) explosions
+// Resolution of the constant chem. pot. composition lookup table
+int LUTres[2] = {20,20};
+
+// Newton-Raphson root finding parameters
+const unsigned int iloop = 1e7;// ceiling to kill infinite loops in iterative scheme
+const double itol = 1.0e-4;    // tolerance for iterative scheme to satisfy equal chemical potential
+const double epsilon = 1.0e-12;// what to consider zero to avoid log(c) explosions
+const double lambda = 0.95;
 
 namespace MMSP{
 
@@ -41,8 +47,8 @@ void generate(int dim, const char* filename)
 	 * 2. Cs, fictitious composition of solid
 	 * 3. Cl, fictitious composition of liquid
 	 */
-	const double cBs = 0.65; // initial solid concentration
-	const double cBl = 0.45; // initial liquid concentration
+	const double cBs = 0.6; // initial solid concentration
+	const double cBl = 0.4; // initial liquid concentration
 
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
@@ -155,6 +161,11 @@ void generate(int dim, const char* filename)
 		exit(-1);
 	}
 
+	if (rank==0) print_energy();
+	#ifdef MPI_VERSION
+	MPI::COMM_WORLD.Barrier();
+	#endif
+
 	/* Generate Cs,Cl look-up table (LUT) using Newton-Raphson method, outlined in Provatas' Appendix C3
 	 * Store results in pureconc, which contains two fields:
 	 * 0. Cl, fictitious composition of pure liquid
@@ -162,19 +173,19 @@ void generate(int dim, const char* filename)
 	 *
 	 * The grid is discretized over phi (axis 0) and c (axis 1).
 	*/
-	int LUTres[2] = {1024, 1024};
-	LUTGRID pureconc(2,0,1+LUTres[0],0,1+LUTres[1]);
+	LUTGRID pureconc(3,0,1+LUTres[0],0,1+LUTres[1]);
 	double dp = 1.0/LUTres[0];
 	double dc = 1.0/LUTres[1];
 	dx(pureconc,0) = dp; // different resolution in phi
 	dx(pureconc,1) = dc; // and c is not unreasonable
-	printf("Equilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(fA, fB, RT), Cl_e(fA, fB, RT));
+	if (rank==0)
+		printf("Equilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(fA, fB, RT), Cl_e(fA, fB, RT));
 
 	for (int n=0; n<nodes(pureconc); n++) {
 		vector<int> x = position(pureconc,n);
-		pureconc(n)[0] = dc*double(x[1]);// + double(rand())/RAND_MAX)/2.0;
-		pureconc(n)[1] = dc*double(x[1]);// + double(rand())/RAND_MAX)/2.0;
-		iterateConc(dp*double(x[0]), dc*double(x[1]), pureconc(n)[0], pureconc(n)[1]);
+		pureconc(n)[0] = 1.0 - dc*double(x[1]);
+		pureconc(n)[1] =       dc*double(x[1]);
+		pureconc(n)[2] = iterateConc(itol, iloop, dp*double(x[0]), dc*double(x[1]), pureconc(n)[0], pureconc(n)[1]);
 	}
 
 	output(pureconc,"consistentC.lut");
@@ -301,53 +312,101 @@ double R(const double& p, const double& Cs, const double& Cl)
 double dCl_dc(const double& p, const double& Cs, const double& Cl)
 {
 	double invR = R(p, Cs, Cl);
-	if (invR>epsilon) invR = 1.0/invR;
+	if (fabs(invR)>epsilon) invR = 1.0/invR;
 	return d2fl_dc2(Cl)*invR;
 }
 
 double dCs_dc(const double& p, const double& Cs, const double& Cl)
 {
 	double invR = R(p, Cs, Cl);
-	if (invR>epsilon) invR = 1.0/invR;
+	if (fabs(invR)>epsilon) invR = 1.0/invR;
 	return d2fs_dc2(Cs)*invR;
 }
 
 double Cl_e(const double& fa, const double& fb, const double& rt) {
+	#ifdef IDEAL
 	return 1.0 / (1.0 + std::exp((fa-fb)/(rt)));
+	#else
+	return Cle;
+	#endif
 }
 
 double Cs_e(const double& fa, const double& fb, const double& rt) {
+	#ifdef IDEAL
 	return std::exp((fb-fa)/(rt)) / (1.0 + std::exp((fb-fa)/(rt)));
+	#else
+	return Cse;
+	#endif
 }
 
 double k()
 {
 	// Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
+	#ifdef IDEAL
 	return Cs_e(fA, fB, RT) / Cl_e(fA, fB, RT);
+	#else
+	return Cse/Cle;
+	#endif
 }
 
 double f(const double& p, const double& c, const double& Cs, const double& Cl)
 {
-	const double w = 0.5; // well barrier height
-	return w*g(p) + h(p)*fs(Cs) + (1.0-h(p))*fl(Cl);
+	//const double w = 1.0; // well barrier height
+	return omega*g(p) + h(p)*fs(Cs) + (1.0-h(p))*fl(Cl);
 }
 
 double d2f_dc2(const double& p, const double& c, const double& Cs, const double& Cl)
 {
 	double invR = R(p, Cs, Cl);
-	if (invR>epsilon) invR = 1.0/invR;
+	if (fabs(invR)>epsilon) invR = 1.0/invR;
 	return d2fl_dc2(Cl)*d2fs_dc2(Cs)*invR;
 }
+
+void print_energy()
+{
+	double it;
+	const unsigned int nc=100;
+	const unsigned int np=20;
+	std::ofstream ef("energy.csv");
+	ef<<"c";
+	for (unsigned int i=0; i<np+1; i++)
+		ef<<",f_"<<i;
+	ef<<'\n';
+	for (unsigned int j=0; j<nc+1; j++) {
+		double c = (1.0/nc)*j;
+		ef << c;
+		double cs=c;
+		double cl=1.0-c;
+		for (unsigned int i=0; i<np+1; i++) {
+			double p = (1.0/np)*i;
+			it=iterateConc(1e-2,1e5,p,c,cs,cl);
+			ef << ',' << f(p, c, cs, cl);
+		}
+		ef<<'\n';
+	}
+	ef.close();
+}
+
 
 /* Given const phase fraction (p) and concentration (c), iteratively determine
  * the solid (Cs) and liquid (Cl) fictitious concentrations that satisfy the
  * equal chemical potential constraint. Pass p and c by const value,
- * Cs and Cl by non-const reference to update in place. This allows use ofthis
+ * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-template<class T> void iterateConc(const T p, const T c, T& Cs, T& Cl)
+template<class T> double iterateConc(const double tol, const unsigned int maxloops, const T p, const T c, T& Cs, T& Cl)
 {
+	int rank=0;
+	#ifdef MPI_VERSION
+	rank=MPI::COMM_WORLD.Get_rank();
+	#endif
+
 	double res = 1.0e3; // residual for Newton-Raphson scheme
+
+	//double lambda = 1.0; //std::max(0.1,0.5*g(c)*g(p));
+
+	MMSP::vector<double> best(3,0.0); // Cs, Cl, res
+	best[2] = res;
 
 	// Iterate until either the matrix is solved (residual<tolerance)
 	// or patience wears out (loop>maxloops, likely due to infinite loop).
@@ -359,32 +418,47 @@ template<class T> void iterateConc(const T p, const T c, T& Cs, T& Cl)
 		double W = h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso);
 		double f1 = h(p)*Cso + (1.0-h(p))*Clo - c;
 		double f2 = dfs_dc(Cso) - dfl_dc(Clo);
-		//double f2 = dfs_dc(Cso)*dCs_dc(p, Cso, Clo) - dfl_dc(Clo)*dCl_dc(p, Cso, Clo);
-		T ds = (W<epsilon)? 0.0: ( d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2)/W;
-		T dl = (W<epsilon)? 0.0: (-d2fs_dc2(Cso)*f1 + h(p)*f2)/W;
+		T ds = (fabs(W)<epsilon)? 0.0: ( d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2)/W;
+		T dl = (fabs(W)<epsilon)? 0.0: (-d2fs_dc2(Cso)*f1 + h(p)*f2)/W;
 
-		Cs = Cso + ds;
-		Cl = Clo + dl;
-		if (Cs<0.0) Cs=0;
-		else if (Cs>1.0) Cs=1;
-		if (Cl<0.0) Cl=0;
-		else if (Cl>1.0) Cl=1;
+		Cs = Cso + lambda*ds;
+		Cl = Clo + lambda*dl;
+		if (Cs<0.0 || Cs>1.0 || Cl<0.0 || Cl>1.0) {
+			// If Newton falls out of bounds, shake everything up.
+			// Helps the numerics, but won't fix fundamental problems.
+			Cs = double(rand())/RAND_MAX;
+			Cl = double(rand())/RAND_MAX;
+			//l=maxloops;
+		}
 
-		res = std::sqrt(pow(Cs-Cso,2.0) + pow(Cl-Clo,2.0));
+		//res = std::sqrt(pow(Cs-Cso,2.0) + pow(Cl-Clo,2.0));
+		//res = std::sqrt(pow(ds,2.0) + pow(dl,2.0));
 
-		/*
 		f1 = h(p)*Cs + (1.0-h(p))*Cl - c; // at convergence, this equals zero
 		f2 = dfs_dc(Cs) - dfl_dc(Cl);     // this, too
 		res = std::sqrt(pow(f1,2.0) + pow(f2,2.0));
-		*/
+
+		if (res < best[2]) {
+			best[0] = Cs;
+			best[1] = Cl;
+			best[2] = res;
+		}
 
 		l++;
-		//printf("p=%.2f, c=%.2f, iter=%-8u: Cs=%.3f, Cl=%.3f, res=%.2e\n", p, c, l, Cs, Cl, res);
+		//if (rank==0)
+		//	printf("p=%.2f, c=%.2f, iter=%-8u: Cs=%.3f, Cl=%.3f, res=%.2e\n", p, c, l, Cs, Cl, res);
 	}
-	if (l>=maxloops)
-		printf("p=%.2f, c=%.2f, iter=%-8u: Cs=%.3f, Cl=%.3f, res=%.2e  (failed to converge)\n", p, c, l, Cs, Cl, res);
-	else
-		printf("p=%.2f, c=%.2f, iter=%-8u: Cs=%.3f, Cl=%.3f, res=%.2e\n", p, c, l, Cs, Cl, res);
+	if (rank==0) {
+		if (l>=maxloops) {
+			printf("p=%.4f, c=%.4f, g=%.2f, iter=%-8u: Cs=%.4f, Cl=%.4f, res=%.2e  (failed to converge)\n", p, c, lambda, l, Cs, Cl, best[2]);
+			// Replace whatever garbage is in there with best values achieved
+			Cs = best[0];
+			Cl = best[1];
+		} else {
+			printf("p=%.4f, c=%.4f, g=%.2f, iter=%-8u: Cs=%.4f, Cl=%.4f, res=%.2e\n", p, c, lambda, l, Cs, Cl, res);
+		}
+	}
+	return double(l);
 }
 
 #endif
