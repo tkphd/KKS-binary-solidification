@@ -24,7 +24,9 @@ const double Ds = 4.0,   Dl = 16.0; // y-axis offset
 const double omega = 20.0;           // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
-int LUTres[2] = {100,100};
+const int LUTnc = 100; // number of points along c-axis
+const int LUTnp = 100; // number of points along p-axis
+
 
 // Newton-Raphson root finding parameters
 const unsigned int iloop = 1e7;// ceiling to kill infinite loops in iterative scheme
@@ -40,11 +42,96 @@ void generate(int dim, const char* filename)
 	rank=MPI::COMM_WORLD.Get_rank();
 	#endif
 	srand(time(NULL)+rank);
+
+	// Consider generating a free energy plot and lookup table.
+	bool nrg_not_found=true; // set False to disable energy plot, save time
+	bool lut_not_found=true; // LUT must exist -- do not disable!
+	if (rank==0) {
+		if (1) {
+			std::ifstream fnrg("energy.csv");
+			if (fnrg) {
+				nrg_not_found=false;
+				fnrg.close();
+			}
+			std::ifstream flut("consistentC.lut");
+			if (flut) {
+				lut_not_found=false;
+				flut.close();
+			}
+		}
+	}
+	#ifdef MPI_VERSION
+	MPI::COMM_WORLD.Bcast(&nrg_not_found,1,MPI_BOOL,0);
+	MPI::COMM_WORLD.Bcast(&lut_not_found,1,MPI_BOOL,0);
+	MPI::COMM_WORLD.Barrier();
+	#endif
+
+	if (nrg_not_found) {
+		// Print out the free energy for phi in [-0.75,1.75] with slices of c in [-0.75,1.75] for inspection.
+		// This is time consuming!
+		if (rank==0)
+			std::cout<<"Sampling free energy landscape, exporting to energy.csv."<<std::endl;
+
+		bool silent=true;
+		#ifdef MPI_VERSION
+		MPI::COMM_WORLD.Barrier();
+		#endif
+		if (rank==0) export_energy(silent);
+		#ifdef MPI_VERSION
+		MPI::COMM_WORLD.Barrier();
+		#endif
+	}
+
+	if (lut_not_found) {
+		/* Generate Cs,Cl look-up table (LUT) using Newton-Raphson method, outlined in Provatas' Appendix C3
+		 * Store results in pureconc, which contains two fields:
+		 * 0. Cs, fictitious composition of pure liquid
+		 * 1. Cl, fictitious composition of pure solid
+		 *
+		 * The grid is discretized over phi (axis 0) and c (axis 1).
+		*/
+		if (rank==0)
+			std::cout<<"Writing look-up table of Cs, Cl to consistentC.lut. Please be patient..."<<std::endl;
+		bool silent=true;
+		LUTGRID pureconc(3,0,1+LUTnp,0,1+LUTnc);
+		double dp = 1.0/LUTnp;
+		double dc = 1.0/LUTnc;
+		dx(pureconc,0) = dp; // different resolution in phi
+		dx(pureconc,1) = dc; // and c is not unreasonable
+
+		#ifndef MPI_VERSION
+		#pragma omp parallel for schedule(static)
+		#endif
+		for (int n=0; n<nodes(pureconc); n++) {
+			if (silent && rank==0)
+				print_progress(step, steps);
+			vector<int> x = position(pureconc,n);
+			pureconc(n)[0] = dc*x[1]; // Cs
+			pureconc(n)[1] = 1.0 - dc*x[1]; // Cl
+			pureconc(n)[2] = iterateConc(itol, iloop, dp*double(x[0]), dc*double(x[1]), pureconc(n)[0], pureconc(n)[1], silent);
+		}
+
+		output(pureconc,"consistentC.lut");
+	}
+
+	// Read concentration look-up table from disk, in its entirety, even in parallel. Should be relatively small.
+	#ifndef MPI_VERSION
+	const int ghost=0;
+	LUTGRID pureconc("consistentC.lut",ghost);
+	#else
+	MPI::COMM_WORLD.Barrier();
+	LUTGRID pureconc(3,0,1+LUTnp,0,1+LUTnc);
+	const bool serial=true; // Please do not change this :-)
+	const int ghost=1;
+	pureconc.input("consistentC.lut",ghost,serial);
+	#endif
+
 	/* Grid contains four fields:
 	 * 0. phi, phase fraction solid. Phi=1 means Solid.
 	 * 1. c, concentration of component A
 	 * 2. Cs, fictitious composition of solid
 	 * 3. Cl, fictitious composition of liquid
+	 * 4. Residual associated with Cs,Cl computation
 	 */
 	const double cBs = 0.6; // initial solid concentration
 	const double cBl = 0.4; // initial liquid concentration
@@ -52,7 +139,7 @@ void generate(int dim, const char* filename)
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
 		int L=1024;
-		GRID1D initGrid(4,0,L);
+		GRID1D initGrid(5,0,L);
 
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
@@ -66,6 +153,9 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = 0.0;
 				initGrid(n)[1] = cBl;
 			}
+			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[4] = 0.0;
+
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -78,16 +168,11 @@ void generate(int dim, const char* filename)
 		assert(C0>0.);
 		if (rank==0)
 			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
-
-		for (int n=0; n<nodes(initGrid); n++) {
-			initGrid(n)[0] = C0;
-			initGrid(n)[1] = C0;
-		}
 
 		output(initGrid,filename);
 	} else if (dim==2) {
 		int L=256;
-		GRID2D initGrid(4,0,2*L,0,L);
+		GRID2D initGrid(5,0,2*L,0,L);
 
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
@@ -101,6 +186,8 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = 0.0;
 				initGrid(n)[1] = cBl;
 			}
+			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[4] = 0.0;
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -113,16 +200,11 @@ void generate(int dim, const char* filename)
 		assert(C0>0.);
 		if (rank==0)
 			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
-
-		for (int n=0; n<nodes(initGrid); n++) {
-			initGrid(n)[0] = C0;
-			initGrid(n)[1] = C0;
-		}
 
 		output(initGrid,filename);
 	} else if (dim==3) {
 		int L=64;
-		GRID3D initGrid(4,0,2*L,0,L,0,L/4);
+		GRID3D initGrid(5,0,2*L,0,L,0,L/4);
 
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
@@ -136,6 +218,8 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = 0.0;
 				initGrid(n)[1] = cBl;
 			}
+			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[4] = 0.0;
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -148,11 +232,6 @@ void generate(int dim, const char* filename)
 		assert(C0>0.);
 		if (rank==0)
 			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
-
-		for (int n=0; n<nodes(initGrid); n++) {
-			initGrid(n)[0] = C0;
-			initGrid(n)[1] = C0;
-		}
 
 		output(initGrid,filename);
 	} else {
@@ -160,53 +239,9 @@ void generate(int dim, const char* filename)
 		exit(-1);
 	}
 
-	/*
-	// Print out the free energy for phi in [-0.75,1.75] with slices of c in [-0.75,1.75] for inspection.
-	// This is time consuming!
-	#ifdef MPI_VERSION
-	MPI::COMM_WORLD.Barrier();
-	#endif
-	if (rank==0) print_energy();
-	#ifdef MPI_VERSION
-	MPI::COMM_WORLD.Barrier();
-	#endif
-	*/
-
-	/* Generate Cs,Cl look-up table (LUT) using Newton-Raphson method, outlined in Provatas' Appendix C3
-	 * Store results in pureconc, which contains two fields:
-	 * 0. Cs, fictitious composition of pure liquid
-	 * 1. Cl, fictitious composition of pure solid
-	 *
-	 * The grid is discretized over phi (axis 0) and c (axis 1).
-	*/
-	LUTGRID pureconc(3,0,1+LUTres[0],0,1+LUTres[1]);
-	double dp = 1.0/LUTres[0];
-	double dc = 1.0/LUTres[1];
-	dx(pureconc,0) = dp; // different resolution in phi
-	dx(pureconc,1) = dc; // and c is not unreasonable
-	bool silent=false;
 	if (rank==0)
 		printf("Equilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(fA, fB, RT), Cl_e(fA, fB, RT));
 
-	unsigned int valid=0;
-	for (int n=0; n<nodes(pureconc); n++) {
-		vector<int> x = position(pureconc,n);
-		pureconc(n)[0] = dc*x[1]; // Cs
-		pureconc(n)[1] = 1.0 - dc*x[1]; // Cl
-		pureconc(n)[2] = iterateConc(itol, iloop, dp*double(x[0]), dc*double(x[1]), pureconc(n)[0], pureconc(n)[1], silent);
-		if (pureconc(n)[2] < itol) valid++;
-	}
-	unsigned int n=nodes(pureconc);
-	#ifdef MPI_VERSION
-	unsigned int myV(valid);
-	unsigned int myN(n);
-	MPI::COMM_WORLD.Allreduce(&myV,&valid,1,MPI_UNSIGNED,MPI_SUM);
-	MPI::COMM_WORLD.Allreduce(&myN,&n,1,MPI_UNSIGNED,MPI_SUM);
-	#endif
-	if (rank==0)
-		printf("%8lu / %-8lu converged (%.2f%)", valid, n, 100.0*double(valid)/n);
-
-	output(pureconc,"consistentC.lut");
 }
 
 template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int steps)
@@ -216,8 +251,18 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
     rank = MPI::COMM_WORLD.Get_rank();
     #endif
 
-	ghostswap(oldGrid);
+	// Read concentration look-up table from disk, in its entirety, even in parallel. Should be relatively small.
+	#ifndef MPI_VERSION
+	const int ghost=0;
+	LUTGRID pureconc("consistentC.lut",ghost);
+	#else
+	LUTGRID pureconc(3,0,1+LUTnp,0,1+LUTnc);
+	const bool serial=true; // Please do not change this :-)
+	const int ghost=1;
+	pureconc.input("consistentC.lut",ghost,serial);
+	#endif
 
+	ghostswap(oldGrid);
    	grid<dim,vector<T> > newGrid(oldGrid);
 
 	double dt = 0.01;
@@ -226,7 +271,22 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 		if (rank==0)
 			print_progress(step, steps);
 
+		#ifndef MPI_VERSION
+		#pragma omp parallel for schedule(static)
+		#endif
 		for (int n=0; n<nodes(oldGrid); n++) {
+			vector<int> x = position(oldGrid,n);
+
+			// Solve dp/dt (Eqn. 6.97)
+
+			// Solve dc/dt (Eqn. 6.100)
+
+			// Interpolate Cs, Cl
+			interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
+
+			// Iterate Cs, Cl using nearest best guesses from LUT -- should quickly converge. Store residual for postmortem reference.
+			newGrid(n)[4] = iterateConc(itol, iloop, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], true); // true means silent
+
 			const vector<T>& phi = oldGrid(n);
 
 			// compute laplacian
@@ -380,7 +440,7 @@ double d2f_dc2(const double& p, const double& c, const double& Cs, const double&
 	return d2fl_dc2(Cl)*d2fs_dc2(Cs)*invR;
 }
 
-void print_energy()
+void export_energy(bool silent)
 {
 	const unsigned int nc=20;
 	const unsigned int np=250;
@@ -398,8 +458,9 @@ void print_energy()
 	}
 	ef<<'\n';
 	for (unsigned int i=0; i<np+1; i++) {
+		if (silent)
+			print_progress(i, np+1);
 		double p = pmin+(pmax-pmin)*dp*i;
-		bool silent=false;
 		ef << p;
 		for (unsigned int j=0; j<nc+1; j++) {
 			double c = cmin+(cmax-cmin)*dc*j;
@@ -486,6 +547,68 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	return res;
 }
 
+template<class T> void interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl)
+{
+	// Determine indices in (p,c) space for LUT access
+	const int idp_lo = std::min(LUTnp,std::max(0,oldGrid(n)[0]*LUTnp));
+	const int idp_hi = std::min(LUTnp,idp_lo+1);
+	const int idc_lo = std::min(LUTnc,std::max(0,oldGrid(n)[1]*LUTnc));
+	const int idc_hi = std::min(LUTnc,idc_lo+1);
+
+	// Bound p,c in LUT neighborhood
+	const double p_lo = dp*idp_lo;
+	const double p_hi = dp*idp_hi;
+	const double c_lo = dc*idc_lo;
+	const double c_hi = dc*idc_hi;
+
+	if (1) { // Interpolate Cs
+		// Determine limiting values of Cs at corners
+		const double C00 = lut[idp_lo][idc_lo][0]; // lower left
+		const double C01 = lut[idp_lo][idc_hi][0]; // upper left
+		const double C10 = lut[idp_hi][idc_lo][0]; // lower right
+		const double C11 = lut[idp_hi][idc_hi][0]; // upper right
+
+		// Linear interpolation to estimate Cs: if the LUT mesh is sufficiently dense, no further work is required. (Big If.)
+		if (idp_lo==idp_hi) {
+			// Linear interpolation in c, only
+			Cs = C00 + ((C01-C00)/(c_hi-c_lo))*(c-c_lo);
+		} else if (idc_lo==idc_hi) {
+			// Linear interpolation in phi, only
+			Cs = C00 + ((C10-C00)/(p_hi-p_lo))*(p-p_lo);
+		} else {
+			// Bilinear interpolation to estimate Cs
+			Cs = (  (p_hi-p   )*(c_hi-c   )*C00
+	               +(p   -p_lo)*(c_hi-c   )*C10
+			       +(p_hi-p   )*(c   -c_lo)*C01
+			       +(p   -p_lo)*(c   -c_lo)*C11
+			     )/((p_hi-p_lo)*(c_hi-c_lo));
+		}
+	}
+
+	if (1) { // Interpolate Cl
+		// Determine limiting values of Cl at corners
+		const double C00 = lut[idp_lo][idc_lo][1]; // lower left
+		const double C01 = lut[idp_lo][idc_hi][1]; // upper left
+		const double C10 = lut[idp_hi][idc_lo][1]; // lower right
+		const double C11 = lut[idp_hi][idc_hi][1]; // upper right
+
+		// Linear interpolation to estimate Cl: if the LUT mesh is sufficiently dense, no further work is required. (Big If.)
+		if (idp_lo==idp_hi) {
+			// Linear interpolation in c, only
+			Cl = C00 + ((C01-C00)/(c_hi-c_lo))*(c-c_lo);
+		} else if (idc_lo==idc_hi) {
+			// Linear interpolation in phi, only
+			Cl = C00 + ((C10-C00)/(p_hi-p_lo))*(p-p_lo);
+		} else {
+			// Bilinear interpolation to estimate Cl
+			Cl = (  (p_hi-p   )*(c_hi-c   )*C00
+	               +(p   -p_lo)*(c_hi-c   )*C10
+			       +(p_hi-p   )*(c   -c_lo)*C01
+			       +(p   -p_lo)*(c   -c_lo)*C11
+			     )/((p_hi-p_lo)*(c_hi-c_lo));
+		}
+	}
+}
 #endif
 
 #include"MMSP.main.hpp"

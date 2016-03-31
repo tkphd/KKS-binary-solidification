@@ -25,6 +25,13 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
  */
 template<class T> double iterateConc(const double tol, const unsigned int maxloops, const T p, const T c, T& Cs, T& Cl, bool silent);
 
+/* Given const LUTGRID, phase fraction (p), and concentration (c), apply
+ * linear interpolation to estimate Cs and Cl. For a dense LUT mesh, values
+ * can be used directly. Otherwise, they serve as a good "best guess" for
+ * iterative calculation, which should converge quickly.
+ */
+template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl);
+
 double h(const double& p)     {return pow(p,3.0) * (6.0*pow(p,2.0)-15.0*p+10.0);                            }
 double hprime(const double& p){return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }
 double g(const double& p)     {return pow(p,2.0) * pow(1.0-p,2.0);}
@@ -58,5 +65,5 @@ double Cs_e(const double& fa, const double& fb, const double& rt); // equilbrium
 
 double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
 
-void print_energy(); // exports free energy curves to energy.csv
+void export_energy(bool silent); // exports free energy curves to energy.csv
 
