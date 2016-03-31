@@ -65,5 +65,9 @@ double Cs_e(const double& fa, const double& fb, const double& rt); // equilbrium
 
 double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
 
+double Q(const double& p){return (1.0-p)/(1.0+k() - (1.0-k())*p);}
+
+double Qprime(const double& p){return (-(1.0+k() - (1.0-k())*p)-(1.0-p)*(k-1.0))/pow(1.0+k() - (1.0-k())*p,2.0);}
+
 void export_energy(bool silent); // exports free energy curves to energy.csv
 

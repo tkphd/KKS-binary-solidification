@@ -18,10 +18,11 @@ const double T = 0.4;      // homologous, isothermal
 const double RT = 8.314*T; // units?
 
 // Parabolic model parameters
-const double Cse = 0.75, Cle = 0.25;// equilibrium concentration
-const double As = 16.0,  Al = 24.0;// 2*curvature of parabola
-const double Ds = 4.0,   Dl = 16.0; // y-axis offset
-const double omega = 20.0;           // double well height
+const double  Ds = 0.0,   Dl  = 1.0e-2; // diffusion constants
+const double  Cse = 0.75, Cle = 0.25;   // equilibrium concentration
+const double  As = 16.0,  Al  = 24.0;   // 2*curvature of parabola
+const double dCs = 4.0,  dCl  = 16.0;   // y-axis offset
+const double omega = 20.0;              // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
 const int LUTnc = 100; // number of points along c-axis
@@ -277,31 +278,52 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 		for (int n=0; n<nodes(oldGrid); n++) {
 			vector<int> x = position(oldGrid,n);
 
-			// Solve dp/dt (Eqn. 6.97)
+			// Cache some frequently-used reference values
+			const T phi_old = oldGrid(n)[0];
+			const T c_old   = oldGrid(n)[1];
+			const T Cs_old  = oldGrid(n)[2];
+			const T Cl_old  = oldGrid(n)[3];
 
-			// Solve dc/dt (Eqn. 6.100)
+			const vector<T> lap = laplacian(oldGrid, x);
+			const T lapPhi = oldGrid(n)[0];
+			const T lapCs  = oldGrid(n)[2];
+			const T lapCl  = oldGrid(n)[3];
 
-			// Interpolate Cs, Cl
+
+			// Ugh, no pretty way to do this...
+			const vector<vector<T> > grdnt = grad(oldGrid, x);
+			vector<T> gradP(dim,0.0);
+			vector<T> gradCs(dim,0.0);
+			vector<T> gradCl(dim,0.0);
+			for (int d=0; d<dim; d++) {
+				gradP[d]  = grdnt[d][0]; // gradient of phi
+				gradCs[d] = grdnt[d][2]; // gradient of Cs
+				gradCl[d] = grdnt[d][3]; // gradient of Cl
+			} // Sorry you had to see that.
+
+
+
+			// Equations of motion!
+			// Update phi (Eqn. 6.97)
+			newGrid(x)[0] = phi_old + dt*(eps_sq*lapPhi
+			                          - gprime(phi_old)
+			                          + hprime(phi_old)*(fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old))/omega
+			                         );
+
+
+
+			// Update c (Eqn. 6.100)
+			const double div_Qh_gradCs =  ( Q(phi_old)*hprime(phi_old)+Qprime(phi_old)*h(phi_old)      )*(gradP*gradCs)
+			                          + Q(phi_old)*h(phi_old)*lapCs;
+			const double div_Q1mh_gradCl =(-Q(phi_old)*hprime(phi_old)+Qprime(phi_old)*(1.0-h(phi_old)))*(gradP*gradCl)
+			                          + Q(phi_old)*(1.0-h(phi_old))*lapCl;
+			newGrid(x)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+
+			// Update Cs, Cl
 			interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-
-			// Iterate Cs, Cl using nearest best guesses from LUT -- should quickly converge. Store residual for postmortem reference.
 			newGrid(n)[4] = iterateConc(itol, iloop, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], true); // true means silent
 
-			const vector<T>& phi = oldGrid(n);
-
-			// compute laplacian
-			vector<T> lap = laplacian(oldGrid,n);
-
-			// compute sum of squares
-			T sum = 0.0;
-			for (int j=0; j<fields(oldGrid); j++) {
-				sum += phi[j]*phi[j];
-			}
-
-			// compute update values
-			for (int j=0; j<fields(oldGrid); j++) {
-				newGrid(n)[j] = phi[j] - dt*(-phi[j]-pow(phi[j],3)+2.0*(phi[j]*sum-lap[j]));
-			}
+			// ~Fin~
 		}
 		swap(oldGrid,newGrid);
 		ghostswap(oldGrid);
@@ -321,7 +343,7 @@ double fl(const double& c)
 		return fB;
 	return (1.0-c)*fA + c*fB + RT*((1.0-c)*log(1.0-c) + c*log(c));
 	#else
-	return Al*pow(c-Cle,2.0)+Dl;
+	return Al*pow(c-Cle,2.0)+dCl;
 	#endif
 }
 
@@ -336,7 +358,7 @@ double fs(const double& c)
 		return fA+delta;
 	return delta + c*fA + (1.0-c)*fB + RT*(c*log(c) + (1.0-c)*log(1.0-c));
 	#else
-	return As*pow(c-Cse,2.0)+Ds;
+	return As*pow(c-Cse,2.0)+dCs;
 	#endif
 }
 
