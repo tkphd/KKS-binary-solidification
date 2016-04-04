@@ -23,34 +23,25 @@ const double eps_sq = 1.0e-2;
 
 // Parabolic model parameters
 const double  Cse = 0.75, Cle = 0.25;   // equilibrium concentration
-const double  As = 16.0,  Al  = 24.0;   // 2*curvature of parabola
-const double dCs = 4.0,  dCl  = 16.0;   // y-axis offset
-const double omega = 20.0;              // double well height
+const double  As = 100.0, Al = 100.0;   // 2*curvature of parabola
+const double dCs = 5.0,  dCl  = 25.0;   // y-axis offset
+const double omega = 200.0;             // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 250; // number of points along c-axis
-const int LUTnp = 250; // number of points along p-axis
+const int LUTnc = 10; // number of points along c-axis
+const int LUTnp = 10; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
 
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
-const unsigned int fasloop = 1e5;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
+const unsigned int fasloop = 1e3;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
 const double reftol = 1.0e-4;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
 const double fastol = 1.0e-1;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
-const double epsilon = 1.0e-10;// what to consider zero to avoid log(c) explosions
+const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
-
-void simple_progress(int step, int steps) {
-	if (step==0)
-		std::cout<<" ["<<std::flush;
-	else if (step==steps-1)
-		std::cout<<"•] "<<std::endl;
-	else if (step % (steps/20) == 0)
-		std::cout<<"• "<<std::flush;
-}
 
 void generate(int dim, const char* filename)
 {
@@ -113,20 +104,20 @@ void generate(int dim, const char* filename)
 		*/
 		if (rank==0)
 			std::cout<<"Writing look-up table of Cs, Cl to consistentC.lut. Please be patient..."<<std::endl;
-		bool silent=true;
+		bool silent=true, randomize=true;
 		LUTGRID pureconc(3,0,1+LUTnp,0,1+LUTnc);
 		dx(pureconc,0) = dp; // different resolution in phi
 		dx(pureconc,1) = dc; // and c is not unreasonable
 
 		#ifndef MPI_VERSION
-		#pragma omp parallel for
+		#pragma omp parallel for schedule(guided) // parcel out chunks of decreasing size
 		#endif
 		for (int n=0; n<nodes(pureconc); n++) {
 			simple_progress(n,nodes(pureconc));
 			vector<int> x = position(pureconc,n);
 			pureconc(n)[0] = dc*x[1]; // Cs
 			pureconc(n)[1] = 1.0 - dc*x[1]; // Cl
-			pureconc(n)[2] = iterateConc(reftol, refloop, dp*x[0], dc*x[1], pureconc(n)[0], pureconc(n)[1], silent);
+			pureconc(n)[2] = iterateConc(reftol, refloop, randomize, dp*x[0], dc*x[1], pureconc(n)[0], pureconc(n)[1], silent);
 		}
 
 		output(pureconc,"consistentC.lut");
@@ -163,6 +154,7 @@ void generate(int dim, const char* filename)
 		int L=1024;
 		GRID1D initGrid(5,0,L);
 
+		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = 32-x[0]%64;
@@ -177,7 +169,7 @@ void generate(int dim, const char* filename)
 			}
 			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			initGrid(n)[4] = 0.0;
-
+			ctot+=initGrid(n)[1]*dx(initGrid);
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -192,10 +184,22 @@ void generate(int dim, const char* filename)
 			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
 
 		output(initGrid,filename);
+
+		#ifdef MPI_VERSION
+		double myct(ctot);
+		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		#endif
+		if (rank==0) {
+			std::ofstream cfile("c.log");
+			cfile<<ctot<<std::endl;
+			cfile.close();
+		}
+
 	} else if (dim==2) {
 		int L=64;
 		GRID2D initGrid(5,0,L,0,L);
 
+		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = sqrt(pow(32-x[0]%64,2)+pow(32-x[1]%64,2));
@@ -210,6 +214,7 @@ void generate(int dim, const char* filename)
 			}
 			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			initGrid(n)[4] = 0.0;
+			ctot+=initGrid(n)[1]*dx(initGrid)*dy(initGrid);
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -224,10 +229,21 @@ void generate(int dim, const char* filename)
 			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
 
 		output(initGrid,filename);
+
+		#ifdef MPI_VERSION
+		double myct(ctot);
+		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		#endif
+		if (rank==0) {
+			std::ofstream cfile("c.log");
+			cfile<<ctot<<std::endl;
+			cfile.close();
+		}
 	} else if (dim==3) {
 		int L=64;
 		GRID3D initGrid(5,0,L,0,L,0,L);
 
+		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = sqrt(pow(32-x[0]%64,2)+pow(32-x[1]%64,2));
@@ -242,6 +258,7 @@ void generate(int dim, const char* filename)
 			}
 			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			initGrid(n)[4] = 0.0;
+			ctot+=initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -256,6 +273,16 @@ void generate(int dim, const char* filename)
 			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
 
 		output(initGrid,filename);
+
+		#ifdef MPI_VERSION
+		double myct(ctot);
+		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		#endif
+		if (rank==0) {
+			std::ofstream cfile("c.log");
+			cfile<<ctot<<std::endl;
+			cfile.close();
+		}
 	} else {
 		std::cerr<<"ERROR: "<<dim<<"-dimensional domains not supported."<<std::endl;
 		exit(-1);
@@ -289,12 +316,20 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 	double dt = 0.01;
 
+	double dV=1.0;
+	for (int d=0; d<dim; d++)
+		dV *= dx(oldGrid,d);
+
+	std::ofstream cfile;
+	if (rank==0)
+		cfile.open("c.log",std::ofstream::out | std::ofstream::app);
+
 	for (int step=0; step<steps; step++) {
 		if (rank==0)
 			print_progress(step, steps);
 
 		#ifndef MPI_VERSION
-		#pragma omp parallel for schedule(static)
+		#pragma omp parallel for schedule(guided) // parcel out chunks of decreasing size
 		#endif
 		for (int n=0; n<nodes(oldGrid); n++) {
 			vector<int> x = position(oldGrid,n);
@@ -341,14 +376,28 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			newGrid(x)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
 
 			// Update Cs, Cl
+			bool silent=true, randomize=false;
 			interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			newGrid(n)[4] = iterateConc(fastol, fasloop, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], true); // true means silent
+			newGrid(n)[4] = iterateConc(fastol, fasloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
 			// ~Fin~
 		}
 		swap(oldGrid,newGrid);
 		ghostswap(oldGrid);
+
+		// Compute total mass
+		double ctot=0.0;
+		for (int n=0; n<nodes(oldGrid); n++)
+			ctot += oldGrid(n)[1]*dV;
+		#ifdef MPI_VERSION
+		double myct(ctot);
+		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		#endif
+		if (rank==0)
+			cfile<<ctot<<std::endl;
 	}
+	if (rank==0)
+		cfile.close();
 }
 
 
@@ -483,32 +532,43 @@ double d2f_dc2(const double& p, const double& c, const double& Cs, const double&
 	return d2fl_dc2(Cl)*d2fs_dc2(Cs)*invR;
 }
 
+void simple_progress(int step, int steps) {
+	if (step==0)
+		std::cout<<" ["<<std::flush;
+	else if (step==steps-1)
+		std::cout<<"•] "<<std::endl;
+	else if (step % (steps/20) == 0)
+		std::cout<<"• "<<std::flush;
+}
+
 void export_energy(bool silent)
 {
-	const unsigned int nc=20;
-	const unsigned int np=250;
+	const int nc=25;
+	const int np=400;
 	const double cmin=-1.5, cmax=2.5;
 	const double pmin=-1.5, pmax=2.5;
 
 	const double dc = (1.0/nc);
 	const double dp = (1.0/np);
 
+	bool randomize=true;
+
 	std::ofstream ef("energy.csv");
 	ef<<"p";
-	for (unsigned int i=0; i<nc+1; i++) {
+	for (int i=0; i<nc+1; i++) {
 		double c = cmin+(cmax-cmin)*dc*i;
 		ef<<",f(c="<<c<<')';
 	}
 	ef<<'\n';
-	for (unsigned int i=0; i<np+1; i++) {
+	for (int i=0; i<np+1; i++) {
 		if (silent)
-			print_progress(i, np+1);
+			simple_progress(i, np+1);
 		double p = pmin+(pmax-pmin)*dp*i;
 		ef << p;
-		for (unsigned int j=0; j<nc+1; j++) {
+		for (int j=0; j<nc+1; j++) {
 			double c = cmin+(cmax-cmin)*dc*j;
 			double cs(0.0), cl(1.0);
-			double res=iterateConc(fastol,refloop,p,c,cs,cl,silent);
+			double res=iterateConc(fastol/5.0,5.0*fasloop,randomize,p,c,cs,cl,silent);
 			ef << ',' << f(p, c, cs, cl);
 		}
 		ef << '\n';
@@ -523,7 +583,7 @@ void export_energy(bool silent)
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-template<class T> double iterateConc(const double tol, const unsigned int maxloops, const T p, const T c, T& Cs, T& Cl, bool silent)
+template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T p, const T c, T& Cs, T& Cl, bool silent)
 {
 	int rank=0;
 	#ifdef MPI_VERSION
@@ -535,7 +595,7 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	double res = std::sqrt(pow(f1,2.0) + pow(f2,2.0)); // initial residual
 
 	double bestCs(c), bestCl(c), bestRes(res);
-	const double cmin(-5.0), cmax(5.0); // min, max values for Cs, Cl before triggering random re-initialization
+	const double cmin(-9.0), cmax(10.0); // min, max values for Cs, Cl before triggering random re-initialization
 
 	// Iterate until either the matrix is solved (residual<tolerance)
 	// or patience wears out (loop>maxloops, likely due to infinite loop).
@@ -554,11 +614,15 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 		Cs = Cso + ds;
 		Cl = Clo + dl;
 		if (Cs<cmin || Cs>cmax || Cl<cmin || Cl>cmax) {
-			// If Newton falls out of bounds, shake everything up.
-			// Helps the numerics, but won't fix fundamental problems.
-			Cs = double(rand())/RAND_MAX;
-			Cl = double(rand())/RAND_MAX;
-			resets++;
+			if (randomize) {
+				// If Newton falls out of bounds, shake everything up.
+				// Helps the numerics, but won't fix fundamental problems.
+				Cs = double(rand())/RAND_MAX;
+				Cl = double(rand())/RAND_MAX;
+				resets++;
+			} else {
+				l=maxloops;
+			}
 		}
 
 		f1 = h(p)*Cs + (1.0-h(p))*Cl - c; // at convergence, this equals zero

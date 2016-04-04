@@ -23,7 +23,7 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-template<class T> double iterateConc(const double tol, const unsigned int maxloops, const T p, const T c, T& Cs, T& Cl, bool silent);
+template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T p, const T c, T& Cs, T& Cl, bool silent);
 
 /* Given const LUTGRID, phase fraction (p), and concentration (c), apply
  * linear interpolation to estimate Cs and Cl. For a dense LUT mesh, values
@@ -68,6 +68,8 @@ double k();                       // Partition coefficient, from solving dfs_dc 
 double Q(const double& p){return (1.0-p)/(1.0+k() - (1.0-k())*p);}
 
 double Qprime(const double& p){return (-(1.0+k() - (1.0-k())*p)-(1.0-p)*(k()-1.0))/pow(1.0+k() - (1.0-k())*p,2.0);}
+
+void simple_progress(int step, int steps); // thread-compatible pared-down version of print_progress
 
 void export_energy(bool silent); // exports free energy curves to energy.csv
 
