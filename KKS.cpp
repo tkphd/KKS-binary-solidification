@@ -14,31 +14,33 @@
 //#define IDEAL            // uncomment this line to switch ON the ideal solution model
 const double fA = 1.0;     // equilibrium free energy of pure liquid A
 const double fB = 2.5;     // equilibrium free energy of pure liquid B
-const double T = 0.4;      // homologous, isothermal
-const double RT = 8.314*T; // units?
+const double Theta = 0.4;      // homologous, isothermal temperature
+const double RT = 8.314*Theta; // units?
 
 // Kinetic and model parameters
-const double Ds = 0.0, Dl  = 1.0e-3; // diffusion constants
-const double eps_sq = 1.0e-2;
+const double Ds = 0.0, Dl = 5.0e-3; // diffusion constants
+const double eps_sq = 0.005;
+const double ps0 = 0.9999, pl0 = 0.0001; // initial phase fractions
+const double cBs = 0.5, cBl = 0.5; // initial concentrations
 
 // Parabolic model parameters
-const double  Cse = 0.75, Cle = 0.25;   // equilibrium concentration
-const double  As = 100.0, Al = 100.0;   // 2*curvature of parabola
+const double  Cse = 0.7,  Cle = 0.3;    // equilibrium concentration
+const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
 const double dCs = 5.0,  dCl  = 25.0;   // y-axis offset
 const double omega = 200.0;             // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 10; // number of points along c-axis
-const int LUTnp = 10; // number of points along p-axis
+const int LUTnc = 125; // number of points along c-axis
+const int LUTnp = 125; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
 
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
-const unsigned int fasloop = 1e3;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
-const double reftol = 1.0e-4;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 1.0e-1;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const unsigned int fasloop = 1e5;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
+const double reftol = 5.0e-5;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
+const double fastol = 5.0e-3;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -146,9 +148,6 @@ void generate(int dim, const char* filename)
 	 * 3. Cl, fictitious composition of liquid
 	 * 4. Residual associated with Cs,Cl computation
 	 */
-	const double cBs = 0.55; // initial solid concentration
-	const double cBl = 0.45; // initial liquid concentration
-
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
 		int L=1024;
@@ -160,11 +159,11 @@ void generate(int dim, const char* filename)
 			double r = 32-x[0]%64;
 			if (r<16.0) { // Solid
 				nSol++;
-				initGrid(n)[0] = 0.999;
+				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
 				nLiq++;
-				initGrid(n)[0] = 0.001;
+				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
 			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
@@ -203,13 +202,13 @@ void generate(int dim, const char* filename)
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = sqrt(pow(32-x[0]%64,2)+pow(32-x[1]%64,2));
-			if (r<24.0) { // Solid
+			if (r<16.0) { // Solid
 				nSol++;
-				initGrid(n)[0] = 0.999;
+				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
 				nLiq++;
-				initGrid(n)[0] = 0.001;
+				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
 			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
@@ -249,11 +248,11 @@ void generate(int dim, const char* filename)
 			double r = sqrt(pow(32-x[0]%64,2)+pow(32-x[1]%64,2));
 			if (r<16.0) { // Solid
 				nSol++;
-				initGrid(n)[0] = 0.999;
+				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
 				nLiq++;
-				initGrid(n)[0] = 0.001;
+				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
 			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
@@ -314,7 +313,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 	ghostswap(oldGrid);
    	grid<dim,vector<T> > newGrid(oldGrid);
 
-	double dt = 0.01;
+	double dt = 0.001;
 
 	double dV=1.0;
 	for (int d=0; d<dim; d++)
@@ -543,10 +542,10 @@ void simple_progress(int step, int steps) {
 
 void export_energy(bool silent)
 {
-	const int nc=25;
-	const int np=400;
-	const double cmin=-1.5, cmax=2.5;
-	const double pmin=-1.5, pmax=2.5;
+	const int nc=20;
+	const int np=300;
+	const double cmin=-0.5, cmax=1.5;
+	const double pmin=-0.5, pmax=1.5;
 
 	const double dc = (1.0/nc);
 	const double dp = (1.0/np);
@@ -568,7 +567,7 @@ void export_energy(bool silent)
 		for (int j=0; j<nc+1; j++) {
 			double c = cmin+(cmax-cmin)*dc*j;
 			double cs(0.0), cl(1.0);
-			double res=iterateConc(fastol/5.0,5.0*fasloop,randomize,p,c,cs,cl,silent);
+			double res=iterateConc(fastol,fasloop,randomize,p,c,cs,cl,silent);
 			ef << ',' << f(p, c, cs, cl);
 		}
 		ef << '\n';
@@ -595,7 +594,7 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	double res = std::sqrt(pow(f1,2.0) + pow(f2,2.0)); // initial residual
 
 	double bestCs(c), bestCl(c), bestRes(res);
-	const double cmin(-9.0), cmax(10.0); // min, max values for Cs, Cl before triggering random re-initialization
+	const double cmin(-4.0), cmax(5.0); // min, max values for Cs, Cl before triggering random re-initialization
 
 	// Iterate until either the matrix is solved (residual<tolerance)
 	// or patience wears out (loop>maxloops, likely due to infinite loop).
