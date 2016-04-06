@@ -18,5 +18,8 @@ KKS: KKS.cpp
 parallel: KKS.cpp
 	$(pcompiler) $(pflags) $< -o $@ -lz
 
+mmsp2xy: mmsp2xy.cpp
+	$(compiler) $(flags) $< -o $@ -lz
+
 clean:
 	rm -f KKS parallel

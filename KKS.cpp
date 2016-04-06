@@ -18,20 +18,20 @@ const double Theta = 0.4;      // homologous, isothermal temperature
 const double RT = 8.314*Theta; // units?
 
 // Kinetic and model parameters
-const double Ds = 0.0, Dl = 5.0e-3; // diffusion constants
-const double eps_sq = 0.005;
+const double Ds = 0.0, Dl = 5.0e-2; // diffusion constants
+const double eps_sq = 0.001;
 const double ps0 = 0.9999, pl0 = 0.0001; // initial phase fractions
-const double cBs = 0.5, cBl = 0.5; // initial concentrations
+const double cBs = 0.45, cBl = 0.55; // initial concentrations
 
 // Parabolic model parameters
 const double  Cse = 0.7,  Cle = 0.3;    // equilibrium concentration
 const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
 const double dCs = 5.0,  dCl  = 25.0;   // y-axis offset
-const double omega = 200.0;             // double well height
+const double omega = 600.0;             // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 125; // number of points along c-axis
-const int LUTnp = 125; // number of points along p-axis
+const int LUTnc = 40; // number of points along c-axis
+const int LUTnp = 40; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
@@ -39,8 +39,8 @@ const double dc = 1.0/LUTnc;
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
 const unsigned int fasloop = 1e5;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
-const double reftol = 5.0e-5;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 5.0e-3;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const double reftol = 5.0e-4;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
+const double fastol = 1.0e-3;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -340,9 +340,9 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T Cl_old  = oldGrid(n)[3];
 
 			const vector<T> lap = laplacian(oldGrid, x);
-			const T lapPhi = oldGrid(n)[0];
-			const T lapCs  = oldGrid(n)[2];
-			const T lapCl  = oldGrid(n)[3];
+			const T lapPhi = lap[0];
+			const T lapCs  = lap[2];
+			const T lapCl  = lap[3];
 
 
 			// Ugh, no pretty way to do this...
@@ -360,18 +360,22 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 			// Equations of motion!
 			// Update phi (Eqn. 6.97)
-			newGrid(x)[0] = phi_old + dt*(eps_sq*lapPhi
-			                          - gprime(phi_old)
-			                          + hprime(phi_old)*(fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old))/omega
-			                         );
+			//newGrid(x)[0] = phi_old + dt*(eps_sq*lapPhi - gprime(phi_old)
+			//                          + hprime(phi_old)*(fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old))/omega
+			newGrid(x)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
+			                               + hprime(phi_old)*(fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old))
+			                             );
 
 
 
 			// Update c (Eqn. 6.100)
-			const double div_Qh_gradCs =  ( Q(phi_old)*hprime(phi_old)+Qprime(phi_old)*h(phi_old)      )*(gradP*gradCs)
-			                          + Q(phi_old)*h(phi_old)*lapCs;
-			const double div_Q1mh_gradCl =(-Q(phi_old)*hprime(phi_old)+Qprime(phi_old)*(1.0-h(phi_old)))*(gradP*gradCl)
-			                          + Q(phi_old)*(1.0-h(phi_old))*lapCl;
+			const double gPgCs = gradP*gradCs;
+			const double div_Qh_gradCs =   ( Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*h(phi_old)      )*gPgCs
+			                               + Q(phi_old)*h(phi_old)*lapCs;
+			const double gPgCl = gradP*gradCl;
+			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*gPgCl
+			                               + Q(phi_old)*(1.0-h(phi_old))*lapCl;
+
 			newGrid(x)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
 
 			// Update Cs, Cl
@@ -542,10 +546,10 @@ void simple_progress(int step, int steps) {
 
 void export_energy(bool silent)
 {
-	const int nc=20;
-	const int np=300;
-	const double cmin=-0.5, cmax=1.5;
-	const double pmin=-0.5, pmax=1.5;
+	const int nc=60;
+	const int np=30;
+	const double cmin=-0.125, cmax=1.625;
+	const double pmin=-0.125, pmax=1.25;
 
 	const double dc = (1.0/nc);
 	const double dp = (1.0/np);
@@ -567,7 +571,7 @@ void export_energy(bool silent)
 		for (int j=0; j<nc+1; j++) {
 			double c = cmin+(cmax-cmin)*dc*j;
 			double cs(0.0), cl(1.0);
-			double res=iterateConc(fastol,fasloop,randomize,p,c,cs,cl,silent);
+			double res=iterateConc(fastol,refloop,randomize,p,c,cs,cl,silent);
 			ef << ',' << f(p, c, cs, cl);
 		}
 		ef << '\n';
