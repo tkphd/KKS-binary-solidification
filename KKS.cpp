@@ -18,20 +18,20 @@ const double Theta = 0.4;      // homologous, isothermal temperature
 const double RT = 8.314*Theta; // units?
 
 // Kinetic and model parameters
-const double Ds = 0.0, Dl = 5.0e-2; // diffusion constants
+const double Ds = 0.0, Dl = 5.0e-3; // diffusion constants
 const double eps_sq = 0.001;
-const double ps0 = 0.9999, pl0 = 0.0001; // initial phase fractions
+const double ps0 = 0.9, pl0 = 0.1; // initial phase fractions
 const double cBs = 0.45, cBl = 0.55; // initial concentrations
 
 // Parabolic model parameters
 const double  Cse = 0.7,  Cle = 0.3;    // equilibrium concentration
 const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
-const double dCs = 5.0,  dCl  = 25.0;   // y-axis offset
-const double omega = 600.0;             // double well height
+const double dCs = 10.0, dCl  = 30.0;   // y-axis offset
+const double omega = 1.125*As;          // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 40; // number of points along c-axis
-const int LUTnp = 40; // number of points along p-axis
+const int LUTnc = 100; // number of points along c-axis
+const int LUTnp = 100; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
@@ -151,13 +151,14 @@ void generate(int dim, const char* filename)
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
 		int L=1024;
+		double diam=30.0;
 		GRID1D initGrid(5,0,L);
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = 32-x[0]%64;
-			if (r<16.0) { // Solid
+			double r = diam-x[0]%64;
+			if (r<diam) { // Solid
 				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
@@ -196,13 +197,14 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L=64;
-		GRID2D initGrid(5,0,L,0,L);
+		double diam=30.0;
+		GRID2D initGrid(5,0,2*L,0,L);
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = sqrt(pow(32-x[0]%64,2)+pow(32-x[1]%64,2));
-			if (r<16.0) { // Solid
+			double r = sqrt(pow(diam-x[0]%64,2)+pow(diam-x[1]%64,2));
+			if (r<diam) { // Solid
 				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
@@ -240,13 +242,14 @@ void generate(int dim, const char* filename)
 		}
 	} else if (dim==3) {
 		int L=64;
+		double diam=30.0;
 		GRID3D initGrid(5,0,L,0,L,0,L);
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = sqrt(pow(32-x[0]%64,2)+pow(32-x[1]%64,2));
-			if (r<16.0) { // Solid
+			double r = sqrt(pow(diam-x[0]%64,2)+pow(diam-x[1]%64,2));
+			if (r<diam) { // Solid
 				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
@@ -339,44 +342,40 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T Cs_old  = oldGrid(n)[2];
 			const T Cl_old  = oldGrid(n)[3];
 
-			const vector<T> lap = laplacian(oldGrid, x);
-			const T lapPhi = lap[0];
-			const T lapCs  = lap[2];
-			const T lapCl  = lap[3];
+			vector<T> laps = laplacian(oldGrid, x);
+			//const T lapC   = laps[1];
+			const T lapPhi = laps[0];
+			const T lapCs  = laps[2];
+			const T lapCl  = laps[3];
 
-
-			// Ugh, no pretty way to do this...
-			const vector<vector<T> > grdnt = grad(oldGrid, x);
-			vector<T> gradP(dim,0.0);
-			vector<T> gradCs(dim,0.0);
-			vector<T> gradCl(dim,0.0);
+			// No elegant way to compute dot product of gradients, so...
+			vector<vector<T> > grads = gradient(oldGrid, x);
+			//double gradPgradC  = 0.0;
+			double gradPgradCs = 0.0;
+			double gradPgradCl = 0.0;
 			for (int d=0; d<dim; d++) {
-				gradP[d]  = grdnt[d][0]; // gradient of phi
-				gradCs[d] = grdnt[d][2]; // gradient of Cs
-				gradCl[d] = grdnt[d][3]; // gradient of Cl
-			} // Sorry you had to see that.
-
-
+				//gradPgradC  += grads[d][0]*grads[d][1];
+				gradPgradCs += grads[d][0]*grads[d][2];
+				gradPgradCl += grads[d][0]*grads[d][3];
+			} // ... sorry you had to see that.
 
 			// Equations of motion!
 			// Update phi (Eqn. 6.97)
-			//newGrid(x)[0] = phi_old + dt*(eps_sq*lapPhi - gprime(phi_old)
-			//                          + hprime(phi_old)*(fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old))/omega
-			newGrid(x)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
-			                               + hprime(phi_old)*(fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old))
-			                             );
+			newGrid(n)[0] = phi_old + dt*( eps_sq*lapPhi - gprime(phi_old)
+			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
+			//newGrid(x)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
+			//                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old) ) );
 
 
 
 			// Update c (Eqn. 6.100)
-			const double gPgCs = gradP*gradCs;
-			const double div_Qh_gradCs =   ( Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*h(phi_old)      )*gPgCs
+			const double div_Qh_gradCs   = ( Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*h(phi_old)      )*(gradPgradCs)
 			                               + Q(phi_old)*h(phi_old)*lapCs;
-			const double gPgCl = gradP*gradCl;
-			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*gPgCl
+			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*(gradPgradCl)
 			                               + Q(phi_old)*(1.0-h(phi_old))*lapCl;
 
-			newGrid(x)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+			//newGrid(n)[1] = c_old + dt*Dl*(Q(phi_old)*lapC + Qprime(phi_old)*(gradPgradC));
 
 			// Update Cs, Cl
 			bool silent=true, randomize=false;
@@ -546,10 +545,10 @@ void simple_progress(int step, int steps) {
 
 void export_energy(bool silent)
 {
-	const int nc=60;
-	const int np=30;
-	const double cmin=-0.125, cmax=1.625;
-	const double pmin=-0.125, pmax=1.25;
+	const int nc=50;
+	const int np=50;
+	const double cmin=-0.0625, cmax=1.0625;
+	const double pmin=-0.3333, pmax=1.3333;
 
 	const double dc = (1.0/nc);
 	const double dp = (1.0/np);
@@ -655,10 +654,18 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 template<class T> void interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl)
 {
 	// Determine indices in (p,c) space for LUT access
-	const int idp_lo = std::min(LUTnp,std::max(0,int(p*LUTnp)));
-	const int idp_hi = std::min(LUTnp,idp_lo+1);
-	const int idc_lo = std::min(LUTnc,std::max(0,int(c*LUTnc)));
-	const int idc_hi = std::min(LUTnc,idc_lo+1);
+	int idp_lo = int(p*LUTnp);
+	int idc_lo = int(c*LUTnc);
+	if (idp_lo>LUTnp)
+		idp_lo = LUTnp-1;
+	if (idp_lo<0)
+		idp_lo = 0;
+	if (idc_lo>LUTnc)
+		idc_lo = LUTnc-1;
+	if (idc_lo<0)
+		idc_lo = 0;
+	int idp_hi = idp_lo+1;
+	int idc_hi = idc_lo+1;
 
 	// Bound p,c in LUT neighborhood
 	const double p_lo = dp*idp_lo;

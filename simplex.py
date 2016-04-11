@@ -34,12 +34,12 @@ z = np.loadtxt('energy.csv',skiprows=1,usecols=range(1,ncol-1),delimiter=',')
 # Configure plot
 plt.rcParams['figure.figsize'] = (12.0, 8.0)
 plt.axis('equal')
-plt.ylabel(r'$\phi$',fontsize=14)
-plt.xlabel(r'$c$',fontsize=14)
+plt.xlabel(r'$\phi$',fontsize=14)
+plt.ylabel(r'$c$',fontsize=14)
 
 # Plot contours
 ncontours=128
-plt.contourf(y,x,z, ncontours, cmap=plt.cm.get_cmap('coolwarm'))
+plt.contourf(x,y,z.transpose(), ncontours, cmap=plt.cm.get_cmap('coolwarm'))
 
 # Plot bounding box surrounding phi=[0,1] and c=[0,1]
 sqx = np.array([0,1,1,0,0])
@@ -48,10 +48,8 @@ plt.plot(sqx,sqy, linestyle=':', color='w')
 
 # Add points from simulation runtime, if available
 for fname in glob.glob("data/*.xy"):
-	y,x = np.loadtxt(fname, delimiter=',', unpack=True)
+	x,y = np.loadtxt(fname, delimiter=',', unpack=True)
 	plt.plot(x,y,'.')
-#x,y = np.loadtxt("data/binary.000000.xy", dtype=float, delimiter=',', unpack=True)
-#plt.plot(x,y,'.')
 
 # Save image and close
 plt.savefig('energy.png', dpi=400, bbox_inches='tight')
