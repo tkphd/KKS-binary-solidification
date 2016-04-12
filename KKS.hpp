@@ -30,7 +30,7 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
  * can be used directly. Otherwise, they serve as a good "best guess" for
  * iterative calculation, which should converge quickly.
  */
-template<class T> void interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl);
+template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl);
 
 //double h(const double& p)     {return p;}// {return pow(p,3.0) * (6.0*pow(p,2.0)-15.0*p+10.0);}
 //double hprime(const double& p){return 1.0;}// {return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }

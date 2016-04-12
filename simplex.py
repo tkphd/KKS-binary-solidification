@@ -49,9 +49,9 @@ plt.plot(sqx,sqy, linestyle=':', color='w')
 # Add points from simulation runtime, if available
 for fname in glob.glob("data/*.xy"):
 	x,y = np.loadtxt(fname, delimiter=',', unpack=True)
-	plt.plot(x,y,'.')
+	plt.plot(x,y,'.',markersize=4)
 
 # Save image and close
-plt.savefig('energy.png', dpi=400, bbox_inches='tight')
+plt.savefig('energy.png', dpi=200, bbox_inches='tight')
 plt.close()
 

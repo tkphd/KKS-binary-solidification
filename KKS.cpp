@@ -18,15 +18,20 @@ const double Theta = 0.4;      // homologous, isothermal temperature
 const double RT = 8.314*Theta; // units?
 
 // Kinetic and model parameters
-const double Ds = 0.0, Dl = 5.0e-3; // diffusion constants
+const double Ds = 0.0, Dl = 1.0e-1; // diffusion constants
 const double eps_sq = 0.001;
-const double ps0 = 0.9, pl0 = 0.1; // initial phase fractions
-const double cBs = 0.45, cBl = 0.55; // initial concentrations
+const double tau = 0.25; // time constant for phase evolution
+const double ps0 = 0.5, pl0 = 0.5; // initial phase fractions
+const double cBs = 0.5, cBl = 0.5; // initial concentrations
+const double randamp = 0.125; // amplitude for initial composition fluctuations
 
 // Parabolic model parameters
-const double  Cse = 0.7,  Cle = 0.3;    // equilibrium concentration
+
+// WARNING: If you change the following 4 lines, you must regenerate the lookup table!
+
+const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
-const double dCs = 10.0, dCl  = 30.0;   // y-axis offset
+const double dCs = 10.0, dCl  = 15.0;   // y-axis offset
 const double omega = 1.125*As;          // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
@@ -38,9 +43,9 @@ const double dc = 1.0/LUTnc;
 
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
-const unsigned int fasloop = 1e5;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
-const double reftol = 5.0e-4;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 1.0e-3;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const unsigned int fasloop = 1e6;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
+const double reftol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
+const double fastol = 1.0e-4;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -151,7 +156,7 @@ void generate(int dim, const char* filename)
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
 		int L=1024;
-		double diam=30.0;
+		double diam=32.0;
 		GRID1D initGrid(5,0,L);
 
 		double ctot = 0.0;
@@ -167,9 +172,8 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
-			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
-			initGrid(n)[4] = 0.0;
-			ctot+=initGrid(n)[1]*dx(initGrid);
+			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			ctot += initGrid(n)[1]*dx(initGrid);
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -197,7 +201,7 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L=64;
-		double diam=30.0;
+		double diam=32.0;
 		GRID2D initGrid(5,0,2*L,0,L);
 
 		double ctot = 0.0;
@@ -206,16 +210,15 @@ void generate(int dim, const char* filename)
 			double r = sqrt(pow(diam-x[0]%64,2)+pow(diam-x[1]%64,2));
 			if (r<diam) { // Solid
 				nSol++;
-				initGrid(n)[0] = ps0;
-				initGrid(n)[1] = cBs;
+				initGrid(n)[0] = ps0 + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[1] = cBs + 2.0*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
 			} else {
 				nLiq++;
-				initGrid(n)[0] = pl0;
-				initGrid(n)[1] = cBl;
+				initGrid(n)[0] = pl0 + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[1] = cBl + 2.0*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
 			}
-			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
-			initGrid(n)[4] = 0.0;
-			ctot+=initGrid(n)[1]*dx(initGrid)*dy(initGrid);
+			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -242,7 +245,7 @@ void generate(int dim, const char* filename)
 		}
 	} else if (dim==3) {
 		int L=64;
-		double diam=30.0;
+		double diam=32.0;
 		GRID3D initGrid(5,0,L,0,L,0,L);
 
 		double ctot = 0.0;
@@ -258,9 +261,8 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
-			interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
-			initGrid(n)[4] = 0.0;
-			ctot+=initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
+			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
 		}
 		unsigned int nTot = nSol+nLiq;
 		#ifdef MPI_VERSION
@@ -343,28 +345,30 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T Cl_old  = oldGrid(n)[3];
 
 			vector<T> laps = laplacian(oldGrid, x);
-			//const T lapC   = laps[1];
+			const T lapC   = laps[1];
 			const T lapPhi = laps[0];
 			const T lapCs  = laps[2];
 			const T lapCl  = laps[3];
 
 			// No elegant way to compute dot product of gradients, so...
 			vector<vector<T> > grads = gradient(oldGrid, x);
-			//double gradPgradC  = 0.0;
+			double gradPgradC  = 0.0;
 			double gradPgradCs = 0.0;
 			double gradPgradCl = 0.0;
 			for (int d=0; d<dim; d++) {
-				//gradPgradC  += grads[d][0]*grads[d][1];
+				gradPgradC  += grads[d][0]*grads[d][1];
 				gradPgradCs += grads[d][0]*grads[d][2];
 				gradPgradCl += grads[d][0]*grads[d][3];
 			} // ... sorry you had to see that.
 
-			// Equations of motion!
+
+			/* =======================================
+			 * Solve the Equations of Motion
+			 * ======================================= */
+
 			// Update phi (Eqn. 6.97)
-			newGrid(n)[0] = phi_old + dt*( eps_sq*lapPhi - gprime(phi_old)
+			newGrid(n)[0] = phi_old + tau*dt*( eps_sq*lapPhi - gprime(phi_old)
 			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
-			//newGrid(x)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
-			//                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-dfl_dc(Cl_old)*(Cl_old-Cs_old) ) );
 
 
 
@@ -375,14 +379,13 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			                               + Q(phi_old)*(1.0-h(phi_old))*lapCl;
 
 			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
-			//newGrid(n)[1] = c_old + dt*Dl*(Q(phi_old)*lapC + Qprime(phi_old)*(gradPgradC));
 
 			// Update Cs, Cl
 			bool silent=true, randomize=false;
-			interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
+			newGrid(n)[4] = interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
 			newGrid(n)[4] = iterateConc(fastol, fasloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
-			// ~Fin~
+			// ~ fin ~
 		}
 		swap(oldGrid,newGrid);
 		ghostswap(oldGrid);
@@ -651,7 +654,7 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	return res;
 }
 
-template<class T> void interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl)
+template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl)
 {
 	// Determine indices in (p,c) space for LUT access
 	int idp_lo = int(p*LUTnp);
@@ -720,6 +723,7 @@ template<class T> void interpolateConc(const LUTGRID& lut, const T p, const T c,
 			     )/((p_hi-p_lo)*(c_hi-c_lo));
 		}
 	}
+	return std::max(std::max(lut[idp_lo][idc_lo][2], lut[idp_lo][idc_hi][2]), std::max(lut[idp_hi][idc_lo][2], lut[idp_hi][idc_hi][2]));
 }
 #endif
 
