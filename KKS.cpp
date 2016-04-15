@@ -19,12 +19,13 @@ const double RT = 8.314*Theta; // units?
 
 // Kinetic and model parameters
 const double meshres = 3.75e-2; // dx=dy
-const double dt = 8.0e-2;
-const double Ds = 0.0, Dl = 3.2e-3; // diffusion constants
+const double dt = 6.0e-2;
+const double Ds = 0.0, Dl = 3.0e-3; // diffusion constants
 const double eps_sq = 0.25;
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = 0.5, cBl = 0.5; // initial concentrations
-//const double randamp = 0.0125; // amplitude for initial composition fluctuations
+const double cBs = 0.425, cBl = 0.425; // initial concentrations
+const double randCamp = 0.0; // amplitude for initial composition fluctuations
+const double randPamp = 0.0; // amplitude for initial phase fluctuations
 
 // Parabolic model parameters
 
@@ -44,9 +45,9 @@ const double dc = 1.0/LUTnc;
 
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
-const unsigned int fasloop = 1e4;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
+const unsigned int fasloop = 1e7;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
 const double reftol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const double fastol = 1.0e-8;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -59,8 +60,8 @@ void generate(int dim, const char* filename)
 	#endif
 	srand(time(NULL)+rank);
 
-	/* ========================================================================
-	 * Construct look-up table for fast enforcement of equal chemical potential
+	/* ======================================================================== *
+	 * Construct look-up table for fast enforcement of equal chemical potential *
 	 * ======================================================================== */
 
 	// Consider generating a free energy plot and lookup table.
@@ -143,30 +144,30 @@ void generate(int dim, const char* filename)
 	pureconc.input("consistentC.lut",ghost,serial);
 	#endif
 
-	/* ========================================================================
-	 * Generate initial conditions using phase diagram and freshly minted LUT
-	 * ======================================================================== */
+	/* ====================================================================== *
+	 * Generate initial conditions using phase diagram and freshly minted LUT *
+	 * ====================================================================== */
 
 	/* Grid contains four fields:
-	 * 0. phi, phase fraction solid. Phi=1 means Solid.
-	 * 1. c, concentration of component A
-	 * 2. Cs, fictitious composition of solid
-	 * 3. Cl, fictitious composition of liquid
-	 * 4. Residual associated with Cs,Cl computation
+	   0. phi, phase fraction solid. Phi=1 means Solid.
+	   1. c, concentration of component A
+	   2. Cs, fictitious composition of solid
+	   3. Cl, fictitious composition of liquid
+	   4. Residual associated with Cs,Cl computation
 	 */
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
-		int L=1024;
-		double diam=28.0;
+		int L=512;
 		GRID1D initGrid(5,0,L);
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
+		double radius=(g1(initGrid,0)-g0(initGrid,0))/4;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = diam-x[0]%64;
-			if (r<diam) { // Solid
+			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
+			if (r < radius) { // Solid
 				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
@@ -204,23 +205,25 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L=64;
-		double diam=28.0;
-		GRID2D initGrid(5,0,2*L,0,L);
+		//double radius=22.0;
+		GRID2D initGrid(5,0,2*L,0,L/4);
+		double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = sqrt(pow(diam-x[0]%64,2)+pow(diam-x[1]%64,2));
-			if (r<diam) { // Solid
+			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
+			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			if (r<radius) { // Solid
 				nSol++;
-				initGrid(n)[0] = ps0; // + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
-				initGrid(n)[1] = cBs; // + 2.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[0] = std::max(0.0,std::min(1.0,  ps0  +randPamp*double(rand()-RAND_MAX/2)/RAND_MAX));
+				initGrid(n)[1] = std::max(0.0,std::min(1.0,  cBs  +randCamp*double(rand()-RAND_MAX/2)/RAND_MAX));
 			} else {
 				nLiq++;
-				initGrid(n)[0] = pl0; // + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
-				initGrid(n)[1] = cBl; // + 2.0*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[0] = std::max(0.0,std::min(1.0,  pl0  +randPamp*double(rand()-RAND_MAX/2)/RAND_MAX));
+				initGrid(n)[1] = std::max(0.0,std::min(1.0,  cBl  +randCamp*double(rand()-RAND_MAX/2)/RAND_MAX));
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
@@ -250,7 +253,7 @@ void generate(int dim, const char* filename)
 		}
 	} else if (dim==3) {
 		int L=64;
-		double diam=28.0;
+		double radius=22.0;
 		GRID3D initGrid(5,0,L,0,L,0,L);
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
@@ -258,8 +261,8 @@ void generate(int dim, const char* filename)
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = sqrt(pow(diam-x[0]%64,2)+pow(diam-x[1]%64,2));
-			if (r<diam) { // Solid
+			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			if (r<radius) { // Solid
 				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
@@ -359,24 +362,22 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 			// No elegant way to compute dot product of gradients, so...
 			vector<vector<T> > grads = gradient(oldGrid, x);
-			//double gradPgradC  = 0.0;
 			double gradPgradCs = 0.0;
 			double gradPgradCl = 0.0;
 			for (int d=0; d<dim; d++) {
-				//gradPgradC  += grads[d][0]*grads[d][1];
 				gradPgradCs += grads[d][0]*grads[d][2];
 				gradPgradCl += grads[d][0]*grads[d][3];
 			} // ... sorry you had to see that.
 
 
-			/* =======================================
-			 * Solve the Equations of Motion
-			 * ======================================= */
+			/* ============================= *
+			 * Solve the Equations of Motion *
+			 * ============================= */
+
 
 			// Update phi (Eqn. 6.97)
 			newGrid(n)[0] = phi_old + (dt/omega)*( (eps_sq/omega)*lapPhi - gprime(phi_old)
-			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
-
+			                                      + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
 
 
 			// Update c (Eqn. 6.100)
@@ -385,12 +386,12 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*(gradPgradCl)
 			                               + Q(phi_old)*(1.0-h(phi_old))*lapCl;
 			/*
-			// Remove phi-dependence from Q for testing
-			const double div_Qh_gradCs   = ( Q(0.5)*hprime(0.5) + Qprime(0.5)*h(0.5)      )*(gradPgradCs) + Q(0.5)*h(0.5)*lapCs;
-			const double div_Q1mh_gradCl = (-Q(0.5)*hprime(0.5) + Qprime(0.5)*(1.0-h(0.5)))*(gradPgradCl) + Q(0.5)*(1.0-h(0.5))*lapCl;
+			// Remove phi-dependence from Q, for testing ONLY
+			const double div_Qh_gradCs   = Q(0.5)*(hprime(phi_old)*(gradPgradCs) + h(phi_old)*lapCs);
+			const double div_Q1mh_gradCl = Q(0.5)*(-hprime(phi_old)*(gradPgradCl) + (1.0-h(phi_old))*lapCl);
 			*/
-
 			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+
 
 			// Update Cs, Cl
 			bool silent=true, randomize=false;
@@ -415,6 +416,23 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 	}
 	if (rank==0)
 		cfile.close();
+
+	double ptot=0.0;
+	unsigned int ntot = nodes(oldGrid);
+	for (int n=0; n<nodes(oldGrid); n++)
+		ptot += oldGrid(n)[0];
+
+	#ifdef MPI_VERSION
+	unsigned int myP(ptot);
+	unsigned int myN(ntot);
+	MPI::COMM_WORLD.Allreduce(&myP, &ptot, 1, MPI_DOUBLE, MPI_SUM);
+	MPI::COMM_WORLD.Allreduce(&myN, &ntot, 1, MPI_UNSIGNED, MPI_SUM);
+	#endif
+	double wps = (100.0*ptot)/ntot;
+	double wpl = (100.0*(ntot-ptot))/ntot;
+	if (rank==0)
+		printf("System is %.2f%% solid, %.2f%% liquid (%.1f%% total).\n", wps, wpl, wps+wpl);
+
 }
 
 
