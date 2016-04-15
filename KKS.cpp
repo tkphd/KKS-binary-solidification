@@ -205,17 +205,16 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L=64;
-		//double radius=22.0;
-		GRID2D initGrid(5,0,2*L,0,L/4);
-		double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
+		GRID2D initGrid(5,0,2*L,0,L);
+		double radius = 22.0; //(g1(initGrid,0)-g0(initGrid,0))/4;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
-			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
+			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
 			if (r<radius) { // Solid
 				nSol++;
 				initGrid(n)[0] = std::max(0.0,std::min(1.0,  ps0  +randPamp*double(rand()-RAND_MAX/2)/RAND_MAX));
