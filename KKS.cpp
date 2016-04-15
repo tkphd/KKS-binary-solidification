@@ -18,12 +18,13 @@ const double Theta = 0.4;      // homologous, isothermal temperature
 const double RT = 8.314*Theta; // units?
 
 // Kinetic and model parameters
-const double Ds = 0.0, Dl = 1.0e-1; // diffusion constants
-const double eps_sq = 0.001;
-const double tau = 0.25; // time constant for phase evolution
-const double ps0 = 0.5, pl0 = 0.5; // initial phase fractions
+const double meshres = 3.75e-2; // dx=dy
+const double dt = 8.0e-2;
+const double Ds = 0.0, Dl = 3.2e-3; // diffusion constants
+const double eps_sq = 0.25;
+const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
 const double cBs = 0.5, cBl = 0.5; // initial concentrations
-const double randamp = 0.125; // amplitude for initial composition fluctuations
+//const double randamp = 0.0125; // amplitude for initial composition fluctuations
 
 // Parabolic model parameters
 
@@ -43,9 +44,9 @@ const double dc = 1.0/LUTnc;
 
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
-const unsigned int fasloop = 1e6;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
+const unsigned int fasloop = 1e4;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
 const double reftol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 1.0e-4;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const double fastol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -156,8 +157,10 @@ void generate(int dim, const char* filename)
 	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
 		int L=1024;
-		double diam=32.0;
+		double diam=28.0;
 		GRID1D initGrid(5,0,L);
+		for (int d=0; d<dim; d++)
+			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
@@ -201,8 +204,10 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L=64;
-		double diam=32.0;
+		double diam=28.0;
 		GRID2D initGrid(5,0,2*L,0,L);
+		for (int d=0; d<dim; d++)
+			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
@@ -210,12 +215,12 @@ void generate(int dim, const char* filename)
 			double r = sqrt(pow(diam-x[0]%64,2)+pow(diam-x[1]%64,2));
 			if (r<diam) { // Solid
 				nSol++;
-				initGrid(n)[0] = ps0 + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
-				initGrid(n)[1] = cBs + 2.0*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[0] = ps0; // + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[1] = cBs; // + 2.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
 			} else {
 				nLiq++;
-				initGrid(n)[0] = pl0 + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
-				initGrid(n)[1] = cBl + 2.0*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[0] = pl0; // + 0.5*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
+				initGrid(n)[1] = cBl; // + 2.0*randamp*double(rand()-RAND_MAX/2)/RAND_MAX;
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
@@ -245,8 +250,10 @@ void generate(int dim, const char* filename)
 		}
 	} else if (dim==3) {
 		int L=64;
-		double diam=32.0;
+		double diam=28.0;
 		GRID3D initGrid(5,0,L,0,L,0,L);
+		for (int d=0; d<dim; d++)
+			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
@@ -317,12 +324,12 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 	ghostswap(oldGrid);
    	grid<dim,vector<T> > newGrid(oldGrid);
-
-	double dt = 0.001;
-
 	double dV=1.0;
-	for (int d=0; d<dim; d++)
-		dV *= dx(oldGrid,d);
+	for (int d=0; d<dim; d++) {
+		dx(oldGrid,d) = meshres;
+		dx(newGrid,d) = meshres;
+		dV *= meshres;
+	}
 
 	std::ofstream cfile;
 	if (rank==0)
@@ -345,18 +352,18 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T Cl_old  = oldGrid(n)[3];
 
 			vector<T> laps = laplacian(oldGrid, x);
-			const T lapC   = laps[1];
+			//const T lapC   = laps[1];
 			const T lapPhi = laps[0];
 			const T lapCs  = laps[2];
 			const T lapCl  = laps[3];
 
 			// No elegant way to compute dot product of gradients, so...
 			vector<vector<T> > grads = gradient(oldGrid, x);
-			double gradPgradC  = 0.0;
+			//double gradPgradC  = 0.0;
 			double gradPgradCs = 0.0;
 			double gradPgradCl = 0.0;
 			for (int d=0; d<dim; d++) {
-				gradPgradC  += grads[d][0]*grads[d][1];
+				//gradPgradC  += grads[d][0]*grads[d][1];
 				gradPgradCs += grads[d][0]*grads[d][2];
 				gradPgradCl += grads[d][0]*grads[d][3];
 			} // ... sorry you had to see that.
@@ -367,7 +374,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			 * ======================================= */
 
 			// Update phi (Eqn. 6.97)
-			newGrid(n)[0] = phi_old + tau*dt*( eps_sq*lapPhi - gprime(phi_old)
+			newGrid(n)[0] = phi_old + (dt/omega)*( (eps_sq/omega)*lapPhi - gprime(phi_old)
 			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
 
 
@@ -377,6 +384,11 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			                               + Q(phi_old)*h(phi_old)*lapCs;
 			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*(gradPgradCl)
 			                               + Q(phi_old)*(1.0-h(phi_old))*lapCl;
+			/*
+			// Remove phi-dependence from Q for testing
+			const double div_Qh_gradCs   = ( Q(0.5)*hprime(0.5) + Qprime(0.5)*h(0.5)      )*(gradPgradCs) + Q(0.5)*h(0.5)*lapCs;
+			const double div_Q1mh_gradCl = (-Q(0.5)*hprime(0.5) + Qprime(0.5)*(1.0-h(0.5)))*(gradPgradCl) + Q(0.5)*(1.0-h(0.5))*lapCl;
+			*/
 
 			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
 
@@ -625,9 +637,9 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 				Cs = double(rand())/RAND_MAX;
 				Cl = double(rand())/RAND_MAX;
 				resets++;
-			} else {
+			} /*else {
 				l=maxloops;
-			}
+			}*/
 		}
 
 		f1 = h(p)*Cs + (1.0-h(p))*Cl - c; // at convergence, this equals zero
