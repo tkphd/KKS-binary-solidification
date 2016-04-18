@@ -1,9 +1,13 @@
-// mmsp2vti.cpp
-// Convert MMSP grid data to VTK image data format
-// Questions/comments to gruberja@gmail.com (Jason Gruber)
+// mmsp2pc.cpp
+// INPUT: MMSP grid containing vector data with at least two fields
+// OUTPUT: Pairs of comma-delimited coordinates representing position in (v0,v1) phase space
+//         Expected usage is for (phase,composition) spaces, hence pc
+// Questions/comments to trevor.keller@gmail.com (Trevor Keller)
 
 #include"MMSP.hpp"
 #include<zlib.h>
+#include<map>
+#include<set>
 
 int main(int argc, char* argv[]) {
 	// command line error check
@@ -113,6 +117,8 @@ int main(int argc, char* argv[]) {
 	int blocks;
 	input.read(reinterpret_cast<char*>(&blocks), sizeof(blocks));
 
+	std::map<int,std::set<int> > phase;
+
 	for (int i = 0; i < blocks; i++) {
 		// read block limits
 		int lmin[3] = {0, 0, 0};
@@ -135,49 +141,54 @@ int main(int argc, char* argv[]) {
 				if (dim == 1) {
 					MMSP::grid<1, MMSP::vector<float> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				} else if (dim == 2) {
 					MMSP::grid<2, MMSP::vector<float> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				} else if (dim == 3) {
 					MMSP::grid<3, MMSP::vector<float> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				}
 			}
 			if (double_type) {
 				if (dim == 1) {
 					MMSP::grid<1, MMSP::vector<double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				} else if (dim == 2) {
 					MMSP::grid<2, MMSP::vector<double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				} else if (dim == 3) {
 					MMSP::grid<3, MMSP::vector<double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				}
 			}
 			if (long_double_type) {
 				if (dim == 1) {
 					MMSP::grid<1, MMSP::vector<long double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				} else if (dim == 2) {
 					MMSP::grid<2, MMSP::vector<long double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				} else if (dim == 3) {
 					MMSP::grid<3, MMSP::vector<long double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						output << GRID(k)[0] << ',' << GRID(k)[1] << '\n';
+						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
 				}
 			}
 		}
 	}
+
+	for (std::map<int,std::set<int> >::const_iterator j=phase.begin(); j!=phase.end(); j++)
+		for (std::set<int>::const_iterator i=j->second.begin(); i!=j->second.end(); i++)
+			output << double(j->first)/10000 << ',' << double(*i)/10000 << '\n';
+
 	output.close();
 	return 0;
 }
