@@ -23,7 +23,7 @@ const double dt = 6.0e-2;
 const double Ds = 0.0, Dl = 3.0e-3; // diffusion constants
 const double eps_sq = 0.25;
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = 0.425, cBl = 0.425; // initial concentrations
+const double cBs = 0.675, cBl = 0.325; // initial concentrations
 const double randCamp = 0.0; // amplitude for initial composition fluctuations
 const double randPamp = 0.0; // amplitude for initial phase fluctuations
 
@@ -33,21 +33,21 @@ const double randPamp = 0.0; // amplitude for initial phase fluctuations
 
 const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
-const double dCs = 10.0, dCl  = 15.0;   // y-axis offset
+const double dCs = 10.0, dCl  = 10.0;   // y-axis offset
 const double omega = 1.125*As;          // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 100; // number of points along c-axis
-const int LUTnp = 100; // number of points along p-axis
+const int LUTnc = 125; // number of points along c-axis
+const int LUTnp = 125; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
 
 // Newton-Raphson root finding parameters
-const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
+const unsigned int refloop = 1e8;// ceiling to kill infinite loops in iterative scheme: reference table threshold
 const unsigned int fasloop = 1e7;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
-const double reftol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 1.0e-8;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const double reftol = 1.0e-8;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
+const double fastol = 1.0e-7;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -65,7 +65,7 @@ void generate(int dim, const char* filename)
 	 * ======================================================================== */
 
 	// Consider generating a free energy plot and lookup table.
-	bool nrg_not_found=true; // set False to disable energy plot, save time
+	bool nrg_not_found=true; // set False to disable energy plot, which may save a few minutes of work
 	bool lut_not_found=true; // LUT must exist -- do not disable!
 	if (rank==0) {
 		if (1) {
@@ -114,18 +114,18 @@ void generate(int dim, const char* filename)
 		if (rank==0)
 			std::cout<<"Writing look-up table of Cs, Cl to consistentC.lut. Please be patient..."<<std::endl;
 		bool silent=true, randomize=true;
-		LUTGRID pureconc(3,0,1+LUTnp,0,1+LUTnc);
+		LUTGRID pureconc(3,-1,2+LUTnp,-1,2+LUTnc);
 		dx(pureconc,0) = dp; // different resolution in phi
 		dx(pureconc,1) = dc; // and c is not unreasonable
 
 		#ifndef MPI_VERSION
-		#pragma omp parallel for schedule(guided) // parcel out chunks of decreasing size
+		#pragma omp parallel for
 		#endif
 		for (int n=0; n<nodes(pureconc); n++) {
 			simple_progress(n,nodes(pureconc));
 			vector<int> x = position(pureconc,n);
-			pureconc(n)[0] = dc*x[1]; // Cs
-			pureconc(n)[1] = 1.0 - dc*x[1]; // Cl
+			pureconc(n)[0] = dc*x[1];       // guess Cs
+			pureconc(n)[1] = 1.0 - dc*x[1]; // guess Cl
 			pureconc(n)[2] = iterateConc(reftol, refloop, randomize, dp*x[0], dc*x[1], pureconc(n)[0], pureconc(n)[1], silent);
 		}
 
@@ -138,7 +138,7 @@ void generate(int dim, const char* filename)
 	LUTGRID pureconc("consistentC.lut",ghost);
 	#else
 	MPI::COMM_WORLD.Barrier();
-	LUTGRID pureconc(3,0,1+LUTnp,0,1+LUTnc);
+	LUTGRID pureconc(3,-1,2+LUTnp,-1,2+LUTnc);
 	const bool serial=true; // Please do not change this :-)
 	const int ghost=1;
 	pureconc.input("consistentC.lut",ghost,serial);
@@ -204,17 +204,18 @@ void generate(int dim, const char* filename)
 		}
 
 	} else if (dim==2) {
-		int L=64;
-		GRID2D initGrid(5,0,2*L,0,L);
-		double radius = 22.0; //(g1(initGrid,0)-g0(initGrid,0))/4;
+		int L=100; //64;
+		GRID2D initGrid(5,0,2*L,0,L/4);
+		//double radius = 20.0;
+		double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
-			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
 			if (r<radius) { // Solid
 				nSol++;
 				initGrid(n)[0] = std::max(0.0,std::min(1.0,  ps0  +randPamp*double(rand()-RAND_MAX/2)/RAND_MAX));
@@ -342,7 +343,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			print_progress(step, steps);
 
 		#ifndef MPI_VERSION
-		#pragma omp parallel for schedule(guided) // parcel out chunks of decreasing size
+		#pragma omp parallel for
 		#endif
 		for (int n=0; n<nodes(oldGrid); n++) {
 			vector<int> x = position(oldGrid,n);
@@ -354,8 +355,8 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T Cl_old  = oldGrid(n)[3];
 
 			vector<T> laps = laplacian(oldGrid, x);
-			//const T lapC   = laps[1];
 			const T lapPhi = laps[0];
+			const T lapC   = laps[1];
 			const T lapCs  = laps[2];
 			const T lapCl  = laps[3];
 
@@ -380,6 +381,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 
 			// Update c (Eqn. 6.100)
+			/*
 			const double div_Qh_gradCs   = ( Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*h(phi_old)      )*(gradPgradCs)
 			                               + Q(phi_old)*h(phi_old)*lapCs;
 			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*(gradPgradCl)
@@ -389,13 +391,17 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const double div_Qh_gradCs   = Q(0.5)*(hprime(phi_old)*(gradPgradCs) + h(phi_old)*lapCs);
 			const double div_Q1mh_gradCl = Q(0.5)*(-hprime(phi_old)*(gradPgradCl) + (1.0-h(phi_old))*lapCl);
 			*/
-			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+
+			//newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+
+			// KKS Eqn. 33
+			newGrid(n)[1] = c_old + dt*Dl*(Q(phi_old)*lapC + Q(phi_old)*hprime(phi_old)*(Cl_old - Cs_old)*lapPhi);
 
 
 			// Update Cs, Cl
 			bool silent=true, randomize=false;
 			newGrid(n)[4] = interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			newGrid(n)[4] = iterateConc(fastol, fasloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
+			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
 			// ~ fin ~
 		}
@@ -602,7 +608,7 @@ void export_energy(bool silent)
 		for (int j=0; j<nc+1; j++) {
 			double c = cmin+(cmax-cmin)*dc*j;
 			double cs(0.0), cl(1.0);
-			double res=iterateConc(fastol,refloop,randomize,p,c,cs,cl,silent);
+			double res=iterateConc(1.0e-6,5e6,randomize,p,c,cs,cl,silent);
 			ef << ',' << f(p, c, cs, cl);
 		}
 		ef << '\n';
@@ -629,7 +635,7 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	double res = std::sqrt(pow(f1,2.0) + pow(f2,2.0)); // initial residual
 
 	double bestCs(c), bestCl(c), bestRes(res);
-	const double cmin(-4.0), cmax(5.0); // min, max values for Cs, Cl before triggering random re-initialization
+	const double cmin(-5.0), cmax(6.0); // min, max values for Cs, Cl before triggering random re-initialization
 
 	// Iterate until either the matrix is solved (residual<tolerance)
 	// or patience wears out (loop>maxloops, likely due to infinite loop).
@@ -686,16 +692,16 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl)
 {
 	// Determine indices in (p,c) space for LUT access
-	int idp_lo = int(p*LUTnp);
-	int idc_lo = int(c*LUTnc);
-	if (idp_lo>LUTnp)
-		idp_lo = LUTnp-1;
-	if (idp_lo<0)
-		idp_lo = 0;
-	if (idc_lo>LUTnc)
-		idc_lo = LUTnc-1;
-	if (idc_lo<0)
-		idc_lo = 0;
+	int idp_lo = int( (p+dp)*(LUTnp+2)/(1.0+2.0*dp) );
+	int idc_lo = int( (c+dc)*(LUTnc+2)/(1.0+2.0*dc) );
+	if (idp_lo>LUTnp+1)
+		idp_lo = LUTnp;
+	if (idp_lo<-1)
+		idp_lo = -1;
+	if (idc_lo>LUTnc+1)
+		idc_lo = LUTnc;
+	if (idc_lo<-1)
+		idc_lo = -1;
 	int idp_hi = idp_lo+1;
 	int idc_hi = idc_lo+1;
 
