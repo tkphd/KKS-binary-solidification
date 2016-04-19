@@ -10,32 +10,34 @@
 
 // Note: KKS.hpp contains important declarations and comments. Have a look.
 
-// Ideal solution model parameters
-//#define CALPHAD            // uncomment this line to switch ON the ideal solution model
-const double fA = 1.0;     // equilibrium free energy of pure liquid A
-const double fB = 2.5;     // equilibrium free energy of pure liquid B
-const double Theta = 0.4;      // homologous, isothermal temperature
-const double RT = 8.314*Theta; // units?
+// To use a synthetic phase diagram that works poorly, comment out the next line.
+#define CALPHAD
+
+#ifdef CALPHAD
+// 10-th order polynomial fitting coefficients from PyCALPHAD
+double calCs[11] = { 6.19383857e+03,-3.09926825e+04, 6.69261368e+04,-8.16668934e+04,
+                     6.19902973e+04,-3.04134700e+04, 9.74968659e+03,-2.04529002e+03,
+                     2.95622845e+02,-3.70962613e+01,-6.12900561e+01};
+double calCl[11] = { 6.18692878e+03,-3.09579439e+04, 6.68516329e+04,-8.15779791e+04,
+                     6.19257214e+04,-3.03841489e+04, 9.74145735e+03,-2.04379606e+03,
+                     2.94796431e+02,-3.39127135e+01,-6.26373908e+01};
+#else
+// Parabolic model parameters
+const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
+const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
+const double dCs = 10.0, dCl  = 10.0;   // y-axis offset
+#endif
 
 // Kinetic and model parameters
-const double meshres = 3.75e-2; // dx=dy
-const double dt = 6.0e-2;
-const double Ds = 0.0, Dl = 3.0e-3; // diffusion constants
-const double eps_sq = 0.25;
+const double meshres = 0.0625; // dx=dy
+const double eps_sq = 1.25;
+const double omega = 2.0*eps_sq/pow(7.0*meshres/2.5,2.0);
+const double dt = 2.0*pow(meshres,2.0)/(32.0*eps_sq); // Co=1/32
+const double Dl = 2.0*pow(meshres,2.0)/(32.0*0.5); // diffusion constant in liquid
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
 const double cBs = 0.4, cBl = 0.4; // initial concentrations
 const double randCamp = 0.0; // amplitude for initial composition fluctuations
 const double randPamp = 0.0; // amplitude for initial phase fluctuations
-
-// Parabolic model parameters
-
-// WARNING: If you change the following 4 lines, you must regenerate the lookup table!
-
-
-const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
-const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
-const double dCs = 10.0, dCl  = 10.0;   // y-axis offset
-const double omega = 1.125*As;          // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
 const int LUTnc = 50; // number of points along c-axis
@@ -43,12 +45,11 @@ const int LUTnp = 50; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
-
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
 const unsigned int fasloop = 1e7;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
 const double reftol = 1.0e-8;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 1.0e-7;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const double fastol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -304,7 +305,7 @@ void generate(int dim, const char* filename)
 	}
 
 	if (rank==0)
-		printf("Equilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(fA, fB, RT), Cl_e(fA, fB, RT));
+		printf("Equilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(), Cl_e());
 
 }
 
@@ -382,7 +383,6 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 
 			// Update c (Eqn. 6.100)
-			/*
 			const double div_Qh_gradCs   = ( Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*h(phi_old)      )*(gradPgradCs)
 			                               + Q(phi_old)*h(phi_old)*lapCs;
 			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*(gradPgradCl)
@@ -393,10 +393,10 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const double div_Q1mh_gradCl = Q(0.5)*(-hprime(phi_old)*(gradPgradCl) + (1.0-h(phi_old))*lapCl);
 			*/
 
-			//newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
 
 			// KKS Eqn. 33
-			newGrid(n)[1] = c_old + dt*Dl*(Q(phi_old)*lapC + Q(phi_old)*hprime(phi_old)*(Cl_old - Cs_old)*lapPhi);
+			//newGrid(n)[1] = c_old + dt*Dl*(Q(phi_old)*lapC + Q(phi_old)*hprime(phi_old)*(Cl_old - Cs_old)*lapPhi);
 
 
 			// Update Cs, Cl
@@ -448,17 +448,17 @@ double fl(const double& c)
 {
 	#ifdef CALPHAD
 	// 10-th order polynomial fit to S. an Mey Cu-Ni CALPHAD database
-	return  8.68879987e+06*pow(c,10)
-	       -4.34769184e+07*pow(c,9)
-	       +9.38854514e+07*pow(c,8)
-	       -1.14566000e+08*pow(c,7)
-	       +8.69653340e+07*pow(c,6)
-	       -4.26686195e+07*pow(c,5)
-	       +1.36792909e+07*pow(c,4)
-	       -2.86974665e+06*pow(c,3)
-	       +4.13883481e+05*pow(c,2)
-	       -4.76063602e+04*c
-	       -8.79244411e+04;
+	return  calCl[0]*pow(c,10)
+	       +calCl[1]*pow(c,9)
+	       +calCl[2]*pow(c,8)
+	       +calCl[3]*pow(c,7)
+	       +calCl[4]*pow(c,6)
+	       +calCl[5]*pow(c,5)
+	       +calCl[6]*pow(c,4)
+	       +calCl[7]*pow(c,3)
+	       +calCl[8]*pow(c,2)
+	       +calCl[9]*c
+	       +calCl[10];
 	#else
 	return Al*pow(c-Cle,2.0)+dCl;
 	#endif
@@ -468,17 +468,17 @@ double fs(const double& c)
 {
 	#ifdef CALPHAD
 	// 10-th order polynomial fit to S. an Mey Cu-Ni CALPHAD database
-	return  8.69364423e+06*pow(c,10)
-	       -4.35012558e+07*pow(c,9)
-	        9.39376102e+07*pow(c,8)
-	       -1.14628203e+08*pow(c,7)
-	        8.70104787e+07*pow(c,6)
-	       -4.26891048e+07*pow(c,5)
-	        1.36850373e+07*pow(c,4)
-	       -2.87088429e+06*pow(c,3)
-	        4.14959341e+05*pow(c,2)
-	       -5.20719622e+04*c
-	       -8.60332083e+04;
+	return  calCs[0]*pow(c,10)
+	       +calCs[1]*pow(c,9)
+	       +calCs[2]*pow(c,8)
+	       +calCs[3]*pow(c,7)
+	       +calCs[4]*pow(c,6)
+	       +calCs[5]*pow(c,5)
+	       +calCs[6]*pow(c,4)
+	       +calCs[7]*pow(c,3)
+	       +calCs[8]*pow(c,2)
+	       +calCs[9]*c
+	       +calCs[10];
 	#else
 	return As*pow(c-Cse,2.0)+dCs;
 	#endif
@@ -488,16 +488,16 @@ double fs(const double& c)
 double dfl_dc(const double& c)
 {
 	#ifdef CALPHAD
-	return  10.0*8.68879987e+06*pow(c,9)
-	       -9.0*4.34769184e+07*pow(c,8)
-	       +8.0*9.38854514e+07*pow(c,7)
-	       -7.0*1.14566000e+08*pow(c,6)
-	       +6.0*8.69653340e+07*pow(c,5)
-	       -5.0*4.26686195e+07*pow(c,4)
-	       +4.0*1.36792909e+07*pow(c,3)
-	       -3.0*2.86974665e+06*pow(c,2)
-	       +2.0*4.13883481e+05*c
-	       -4.76063602e+04;
+	return  10.0*calCl[0]*pow(c,9)
+	       +9.0*calCl[1]*pow(c,8)
+	       +8.0*calCl[2]*pow(c,7)
+	       +7.0*calCl[3]*pow(c,6)
+	       +6.0*calCl[4]*pow(c,5)
+	       +5.0*calCl[5]*pow(c,4)
+	       +4.0*calCl[6]*pow(c,3)
+	       +3.0*calCl[7]*pow(c,2)
+	       +2.0*calCl[8]*c
+	       +calCl[9];
 	#else
 	return 2.0*Al*(c-Cle);
 	#endif
@@ -506,16 +506,16 @@ double dfl_dc(const double& c)
 double dfs_dc(const double& c)
 {
 	#ifdef CALPHAD
-	return  10.0*8.69364423e+06*pow(c,9)
-	       -9.0*4.35012558e+07*pow(c,8)
-	        8.0*9.39376102e+07*pow(c,7)
-	       -7.0*1.14628203e+08*pow(c,6)
-	        6.0*8.70104787e+07*pow(c,5)
-	       -5.0*4.26891048e+07*pow(c,4)
-	        4.0*1.36850373e+07*pow(c,3)
-	       -3.0*2.87088429e+06*pow(c,2)
-	        2.0*4.14959341e+05*c
-	       -5.20719622e+04;
+	return  10.0*calCs[0]*pow(c,9)
+	       +9.0*calCs[1]*pow(c,8)
+	       +8.0*calCs[2]*pow(c,7)
+	       +7.0*calCs[3]*pow(c,6)
+	       +6.0*calCs[4]*pow(c,5)
+	       +5.0*calCs[5]*pow(c,4)
+	       +4.0*calCs[6]*pow(c,3)
+	       +3.0*calCs[7]*pow(c,2)
+	       +2.0*calCs[8]*c
+	       +calCs[9];
 	#else
 	return 2.0*As*(c-Cse);
 	#endif
@@ -524,15 +524,15 @@ double dfs_dc(const double& c)
 double d2fl_dc2(const double& c)
 {
 	#ifdef CALPHAD
-	return  90.0*8.68879987e+06*pow(c,8)
-	       -72.0*4.34769184e+07*pow(c,7)
-	       +56.0*9.38854514e+07*pow(c,6)
-	       -42.0*1.14566000e+08*pow(c,5)
-	       +30.0*8.69653340e+07*pow(c,4)
-	       -20.0*4.26686195e+07*pow(c,3)
-	       +12.0*1.36792909e+07*pow(c,2)
-	       -6.0*2.86974665e+06*c
-	       +2.0*4.13883481e+05;
+	return  90.0*calCl[0]*pow(c,8)
+	       +72.0*calCl[1]*pow(c,7)
+	       +56.0*calCl[2]*pow(c,6)
+	       +42.0*calCl[3]*pow(c,5)
+	       +30.0*calCl[4]*pow(c,4)
+	       +20.0*calCl[5]*pow(c,3)
+	       +12.0*calCl[6]*pow(c,2)
+	       +6.0*calCl[7]*c
+	       +2.0*calCl[8];
 	#else
 	return 2.0*Al;
 	#endif
@@ -541,15 +541,15 @@ double d2fl_dc2(const double& c)
 double d2fs_dc2(const double& c)
 {
 	#ifdef CALPHAD
-	return  80.0*8.69364423e+06*pow(c,8)
-	       -72.0*4.35012558e+07*pow(c,7)
-	        56.0*9.39376102e+07*pow(c,6)
-	       -42.0*1.14628203e+08*pow(c,5)
-	        30.0*8.70104787e+07*pow(c,4)
-	       -20.0*4.26891048e+07*pow(c,3)
-	        12.0*1.36850373e+07*pow(c,2)
-	       -6.0*2.87088429e+06*c
-	        2.0*4.14959341e+05;
+	return  90.0*calCs[0]*pow(c,8)
+	       +72.0*calCs[1]*pow(c,7)
+	       +56.0*calCs[2]*pow(c,6)
+	       +42.0*calCs[3]*pow(c,5)
+	       +30.0*calCs[4]*pow(c,4)
+	       +20.0*calCs[5]*pow(c,3)
+	       +12.0*calCs[6]*pow(c,2)
+	       +6.0*calCs[7]*c
+	       +2.0*calCs[8];
 	#else
 	return 2.0*As;
 	#endif
@@ -575,17 +575,17 @@ double dCs_dc(const double& p, const double& Cs, const double& Cl)
 	return d2fs_dc2(Cs)*invR;
 }
 
-double Cl_e(const double& fa, const double& fb, const double& rt) {
+double Cl_e() {
 	#ifdef CALPHAD
-	return 1.0 / (1.0 + std::exp((fa-fb)/(rt)));
+	return 0.33886;
 	#else
 	return Cle;
 	#endif
 }
 
-double Cs_e(const double& fa, const double& fb, const double& rt) {
+double Cs_e() {
 	#ifdef CALPHAD
-	return std::exp((fb-fa)/(rt)) / (1.0 + std::exp((fb-fa)/(rt)));
+	return 0.48300;
 	#else
 	return Cse;
 	#endif
@@ -594,11 +594,7 @@ double Cs_e(const double& fa, const double& fb, const double& rt) {
 double k()
 {
 	// Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
-	#ifdef CALPHAD
-	return 0.48300 / 0.33886;
-	#else
-	return Cse/Cle;
-	#endif
+	return Cs_e()/Cl_e();
 }
 
 double f(const double& p, const double& c, const double& Cs, const double& Cl)
@@ -724,9 +720,9 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	res = bestRes;
 	if (!silent && rank==0) {
 		if (l>=maxloops)
-			printf("p=%.4f, c=%.4f, iter=%-8u:\tCs=%.4f, Cl=%.4f, res=%.2e, %7lu resets (failed to converge)\n", p, c, l, Cs, Cl, res, resets);
+			printf("p=%.4f, c=%.4f, iter=%-8u:\tCs=%.4f, Cl=%.4f, res=%.2e, %7u resets (failed to converge)\n", p, c, l, Cs, Cl, res, resets);
 		else
-			printf("p=%.4f, c=%.4f, iter=%-8u:\tCs=%.4f, Cl=%.4f, res=%.2e, %7lu resets\n",                      p, c, l, Cs, Cl, res, resets);
+			printf("p=%.4f, c=%.4f, iter=%-8u:\tCs=%.4f, Cl=%.4f, res=%.2e, %7u resets\n",                      p, c, l, Cs, Cl, res, resets);
 	}
 	return res;
 }

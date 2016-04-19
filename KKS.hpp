@@ -61,9 +61,9 @@ double f(const double& p, const double& c, const double& Cs, const double& Cl); 
 
 double d2f_dc2(const double& p, const double& c, const double& Cs, const double& Cl); // second derivative of f w.r.t. c
 
-double Cl_e(const double& fa, const double& fb, const double& rt); // equilbrium Cl
+double Cl_e(); // equilbrium Cl
 
-double Cs_e(const double& fa, const double& fb, const double& rt); // equilbrium Cs
+double Cs_e(); // equilbrium Cs
 
 double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
 
