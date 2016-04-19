@@ -11,7 +11,7 @@
 // Note: KKS.hpp contains important declarations and comments. Have a look.
 
 // Ideal solution model parameters
-//#define IDEAL            // uncomment this line to switch ON the ideal solution model
+//#define CALPHAD            // uncomment this line to switch ON the ideal solution model
 const double fA = 1.0;     // equilibrium free energy of pure liquid A
 const double fB = 2.5;     // equilibrium free energy of pure liquid B
 const double Theta = 0.4;      // homologous, isothermal temperature
@@ -23,7 +23,7 @@ const double dt = 6.0e-2;
 const double Ds = 0.0, Dl = 3.0e-3; // diffusion constants
 const double eps_sq = 0.25;
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = 0.675, cBl = 0.325; // initial concentrations
+const double cBs = 0.4, cBl = 0.4; // initial concentrations
 const double randCamp = 0.0; // amplitude for initial composition fluctuations
 const double randPamp = 0.0; // amplitude for initial phase fluctuations
 
@@ -31,20 +31,21 @@ const double randPamp = 0.0; // amplitude for initial phase fluctuations
 
 // WARNING: If you change the following 4 lines, you must regenerate the lookup table!
 
+
 const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
 const double dCs = 10.0, dCl  = 10.0;   // y-axis offset
 const double omega = 1.125*As;          // double well height
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 125; // number of points along c-axis
-const int LUTnp = 125; // number of points along p-axis
+const int LUTnc = 50; // number of points along c-axis
+const int LUTnp = 50; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
 
 // Newton-Raphson root finding parameters
-const unsigned int refloop = 1e8;// ceiling to kill infinite loops in iterative scheme: reference table threshold
+const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
 const unsigned int fasloop = 1e7;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
 const double reftol = 1.0e-8;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
 const double fastol = 1.0e-7;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
@@ -445,13 +446,19 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 double fl(const double& c)
 {
-	#ifdef IDEAL
-	// ideal solution model for liquid free energy
-	if (c < epsilon)
-		return fA;
-	else if (1.0-c < epsilon)
-		return fB;
-	return (1.0-c)*fA + c*fB + RT*((1.0-c)*log(1.0-c) + c*log(c));
+	#ifdef CALPHAD
+	// 10-th order polynomial fit to S. an Mey Cu-Ni CALPHAD database
+	return  8.68879987e+06*pow(c,10)
+	       -4.34769184e+07*pow(c,9)
+	       +9.38854514e+07*pow(c,8)
+	       -1.14566000e+08*pow(c,7)
+	       +8.69653340e+07*pow(c,6)
+	       -4.26686195e+07*pow(c,5)
+	       +1.36792909e+07*pow(c,4)
+	       -2.86974665e+06*pow(c,3)
+	       +4.13883481e+05*pow(c,2)
+	       -4.76063602e+04*c
+	       -8.79244411e+04;
 	#else
 	return Al*pow(c-Cle,2.0)+dCl;
 	#endif
@@ -459,14 +466,19 @@ double fl(const double& c)
 
 double fs(const double& c)
 {
-	#ifdef IDEAL
-	// ideal solution model for solid free energy, transformed from liquid
-	double delta = -0.25; // negative solidifies, positive melts
-	if (c < epsilon)
-		return fB+delta;
-	else if (1.0-c < epsilon)
-		return fA+delta;
-	return delta + c*fA + (1.0-c)*fB + RT*(c*log(c) + (1.0-c)*log(1.0-c));
+	#ifdef CALPHAD
+	// 10-th order polynomial fit to S. an Mey Cu-Ni CALPHAD database
+	return  8.69364423e+06*pow(c,10)
+	       -4.35012558e+07*pow(c,9)
+	        9.39376102e+07*pow(c,8)
+	       -1.14628203e+08*pow(c,7)
+	        8.70104787e+07*pow(c,6)
+	       -4.26891048e+07*pow(c,5)
+	        1.36850373e+07*pow(c,4)
+	       -2.87088429e+06*pow(c,3)
+	        4.14959341e+05*pow(c,2)
+	       -5.20719622e+04*c
+	       -8.60332083e+04;
 	#else
 	return As*pow(c-Cse,2.0)+dCs;
 	#endif
@@ -475,10 +487,17 @@ double fs(const double& c)
 
 double dfl_dc(const double& c)
 {
-	#ifdef IDEAL
-	if (std::min(c,1.0-c) < epsilon)
-		return fB-fA;
-	return fB - fA + RT*(log(1.0-c) - log(c));
+	#ifdef CALPHAD
+	return  10.0*8.68879987e+06*pow(c,9)
+	       -9.0*4.34769184e+07*pow(c,8)
+	       +8.0*9.38854514e+07*pow(c,7)
+	       -7.0*1.14566000e+08*pow(c,6)
+	       +6.0*8.69653340e+07*pow(c,5)
+	       -5.0*4.26686195e+07*pow(c,4)
+	       +4.0*1.36792909e+07*pow(c,3)
+	       -3.0*2.86974665e+06*pow(c,2)
+	       +2.0*4.13883481e+05*c
+	       -4.76063602e+04;
 	#else
 	return 2.0*Al*(c-Cle);
 	#endif
@@ -486,10 +505,17 @@ double dfl_dc(const double& c)
 
 double dfs_dc(const double& c)
 {
-	#ifdef IDEAL
-	if (std::min(c,1.0-c) < epsilon)
-		return fA-fB;
-	return fA - fB + RT*(log(1.0-c) - log(c));
+	#ifdef CALPHAD
+	return  10.0*8.69364423e+06*pow(c,9)
+	       -9.0*4.35012558e+07*pow(c,8)
+	        8.0*9.39376102e+07*pow(c,7)
+	       -7.0*1.14628203e+08*pow(c,6)
+	        6.0*8.70104787e+07*pow(c,5)
+	       -5.0*4.26891048e+07*pow(c,4)
+	        4.0*1.36850373e+07*pow(c,3)
+	       -3.0*2.87088429e+06*pow(c,2)
+	        2.0*4.14959341e+05*c
+	       -5.20719622e+04;
 	#else
 	return 2.0*As*(c-Cse);
 	#endif
@@ -497,8 +523,16 @@ double dfs_dc(const double& c)
 
 double d2fl_dc2(const double& c)
 {
-	#ifdef IDEAL
-	return RT/(c*(1.0-c));
+	#ifdef CALPHAD
+	return  90.0*8.68879987e+06*pow(c,8)
+	       -72.0*4.34769184e+07*pow(c,7)
+	       +56.0*9.38854514e+07*pow(c,6)
+	       -42.0*1.14566000e+08*pow(c,5)
+	       +30.0*8.69653340e+07*pow(c,4)
+	       -20.0*4.26686195e+07*pow(c,3)
+	       +12.0*1.36792909e+07*pow(c,2)
+	       -6.0*2.86974665e+06*c
+	       +2.0*4.13883481e+05;
 	#else
 	return 2.0*Al;
 	#endif
@@ -506,8 +540,16 @@ double d2fl_dc2(const double& c)
 
 double d2fs_dc2(const double& c)
 {
-	#ifdef IDEAL
-	return RT/(c*(1.0-c));
+	#ifdef CALPHAD
+	return  80.0*8.69364423e+06*pow(c,8)
+	       -72.0*4.35012558e+07*pow(c,7)
+	        56.0*9.39376102e+07*pow(c,6)
+	       -42.0*1.14628203e+08*pow(c,5)
+	        30.0*8.70104787e+07*pow(c,4)
+	       -20.0*4.26891048e+07*pow(c,3)
+	        12.0*1.36850373e+07*pow(c,2)
+	       -6.0*2.87088429e+06*c
+	        2.0*4.14959341e+05;
 	#else
 	return 2.0*As;
 	#endif
@@ -534,7 +576,7 @@ double dCs_dc(const double& p, const double& Cs, const double& Cl)
 }
 
 double Cl_e(const double& fa, const double& fb, const double& rt) {
-	#ifdef IDEAL
+	#ifdef CALPHAD
 	return 1.0 / (1.0 + std::exp((fa-fb)/(rt)));
 	#else
 	return Cle;
@@ -542,7 +584,7 @@ double Cl_e(const double& fa, const double& fb, const double& rt) {
 }
 
 double Cs_e(const double& fa, const double& fb, const double& rt) {
-	#ifdef IDEAL
+	#ifdef CALPHAD
 	return std::exp((fb-fa)/(rt)) / (1.0 + std::exp((fb-fa)/(rt)));
 	#else
 	return Cse;
@@ -552,8 +594,8 @@ double Cs_e(const double& fa, const double& fb, const double& rt) {
 double k()
 {
 	// Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
-	#ifdef IDEAL
-	return Cs_e(fA, fB, RT) / Cl_e(fA, fB, RT);
+	#ifdef CALPHAD
+	return 0.48300 / 0.33886;
 	#else
 	return Cse/Cle;
 	#endif
