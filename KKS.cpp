@@ -21,27 +21,27 @@ double calCs[11] = { 6.19383857e+03,-3.09926825e+04, 6.69261368e+04,-8.16668934e
 double calCl[11] = { 6.18692878e+03,-3.09579439e+04, 6.68516329e+04,-8.15779791e+04,
                      6.19257214e+04,-3.03841489e+04, 9.74145735e+03,-2.04379606e+03,
                      2.94796431e+02,-3.39127135e+01,-6.26373908e+01};
+const double  Cse = 0.48300,  Cle = 0.33886;    // equilibrium concentration
 #else
 // Parabolic model parameters
-const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
 const double dCs = 10.0, dCl  = 10.0;   // y-axis offset
+const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 #endif
 
 // Kinetic and model parameters
-const double meshres = 0.0625; // dx=dy
+const double meshres = 0.075; // dx=dy
 const double eps_sq = 1.25;
 const double omega = 2.0*eps_sq/pow(7.0*meshres/2.5,2.0);
 const double dt = 2.0*pow(meshres,2.0)/(32.0*eps_sq); // Co=1/32
 const double Dl = 2.0*pow(meshres,2.0)/(32.0*0.5); // diffusion constant in liquid
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = 0.4, cBl = 0.4; // initial concentrations
-const double randCamp = 0.0; // amplitude for initial composition fluctuations
-const double randPamp = 0.0; // amplitude for initial phase fluctuations
+const double cBs = (Cse+Cle)/2.0;  // initial solid concentration
+const double cBl = (Cse+Cle)/2.0;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 50; // number of points along c-axis
-const int LUTnp = 50; // number of points along p-axis
+const int LUTnc = 125; // number of points along c-axis
+const int LUTnp = 125; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
@@ -126,7 +126,7 @@ void generate(int dim, const char* filename)
 		for (int n=0; n<nodes(pureconc); n++) {
 			simple_progress(n,nodes(pureconc));
 			vector<int> x = position(pureconc,n);
-			pureconc(n)[0] = dc*x[1];       // guess Cs
+			pureconc(n)[0] = 1.0 - dc*x[1]; // guess Cs
 			pureconc(n)[1] = 1.0 - dc*x[1]; // guess Cl
 			pureconc(n)[2] = iterateConc(reftol, refloop, randomize, dp*x[0], dc*x[1], pureconc(n)[0], pureconc(n)[1], silent);
 		}
@@ -206,26 +206,27 @@ void generate(int dim, const char* filename)
 		}
 
 	} else if (dim==2) {
-		int L=100; //64;
-		GRID2D initGrid(5,0,2*L,0,L/4);
-		//double radius = 20.0;
-		double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
+		int L=64;
+		//int L=100;
+		GRID2D initGrid(5,0,2*L,0,L);
+		double radius = 20.0;
+		//double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
-			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
+			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
 			if (r<radius) { // Solid
 				nSol++;
-				initGrid(n)[0] = std::max(0.0,std::min(1.0,  ps0  +randPamp*double(rand()-RAND_MAX/2)/RAND_MAX));
-				initGrid(n)[1] = std::max(0.0,std::min(1.0,  cBs  +randCamp*double(rand()-RAND_MAX/2)/RAND_MAX));
+				initGrid(n)[0] = ps0;
+				initGrid(n)[1] = cBs;
 			} else {
 				nLiq++;
-				initGrid(n)[0] = std::max(0.0,std::min(1.0,  pl0  +randPamp*double(rand()-RAND_MAX/2)/RAND_MAX));
-				initGrid(n)[1] = std::max(0.0,std::min(1.0,  cBl  +randCamp*double(rand()-RAND_MAX/2)/RAND_MAX));
+				initGrid(n)[0] = pl0;
+				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
@@ -575,21 +576,9 @@ double dCs_dc(const double& p, const double& Cs, const double& Cl)
 	return d2fs_dc2(Cs)*invR;
 }
 
-double Cl_e() {
-	#ifdef CALPHAD
-	return 0.33886;
-	#else
-	return Cle;
-	#endif
-}
+double Cl_e() {return Cle;}
 
-double Cs_e() {
-	#ifdef CALPHAD
-	return 0.48300;
-	#else
-	return Cse;
-	#endif
-}
+double Cs_e() {return Cse;}
 
 double k()
 {
@@ -621,8 +610,8 @@ void simple_progress(int step, int steps) {
 
 void export_energy(bool silent)
 {
-	const int nc=50;
-	const int np=50;
+	const int nc=75;
+	const int np=75;
 	const double cmin=-0.0625, cmax=1.0625;
 	const double pmin=-0.3333, pmax=1.3333;
 
