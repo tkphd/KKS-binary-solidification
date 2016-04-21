@@ -29,12 +29,16 @@ const double dCs = 10.0, dCl  = 10.0;   // y-axis offset
 const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 #endif
 
+// Numerical stability (Courant-Friedrich-Lewy) parameters
+const double CFLp = 1.0/16.0; // controls timestep
+const double CFLc = 1.0/16.0; // controls diffusivity
+
 // Kinetic and model parameters
 const double meshres = 0.075; // dx=dy
 const double eps_sq = 1.25;
 const double omega = 2.0*eps_sq/pow(7.0*meshres/2.5,2.0);
-const double dt = 2.0*pow(meshres,2.0)/(32.0*eps_sq); // Co=1/32
-const double Dl = 2.0*pow(meshres,2.0)/(32.0*0.5); // diffusion constant in liquid
+const double dt = 2.0*CFLp*pow(meshres,2.0)/eps_sq; // Co=1/32
+const double Dl = 2.0*CFLc*pow(meshres,2.0)/0.5; // diffusion constant in liquid
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
 const double cBs = (Cse+Cle)/2.0;  // initial solid concentration
 const double cBl = (Cse+Cle)/2.0;  // initial liquid concentration
@@ -170,28 +174,16 @@ void generate(int dim, const char* filename)
 			vector<int> x = position(initGrid,n);
 			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
 			if (r < radius) { // Solid
-				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
-				nLiq++;
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid);
 		}
-		unsigned int nTot = nSol+nLiq;
-		#ifdef MPI_VERSION
-		unsigned int mySol(nSol), myLiq(nLiq), myTot(nTot);
-		MPI::COMM_WORLD.Allreduce(&mySol, &nSol, 1, MPI_UNSIGNED, MPI_SUM);
-		MPI::COMM_WORLD.Allreduce(&myLiq, &nLiq, 1, MPI_UNSIGNED, MPI_SUM);
-		MPI::COMM_WORLD.Allreduce(&myTot, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
-		#endif
-		double C0 = (double(nLiq)*cBs + double(nSol)*cBl) / double(nSol+nLiq); // weighted average of solid + liquid
-		assert(C0>0.);
-		if (rank==0)
-			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
+		print_values(initGrid, rank);
 
 		output(initGrid,filename);
 
@@ -208,8 +200,8 @@ void generate(int dim, const char* filename)
 	} else if (dim==2) {
 		int L=64;
 		//int L=100;
-		GRID2D initGrid(5,0,2*L,0,L);
-		double radius = 20.0;
+		GRID2D initGrid(5,0,3*L,0,2*L);
+		double radius = 10.0;
 		//double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
@@ -220,28 +212,16 @@ void generate(int dim, const char* filename)
 			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
 			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
 			if (r<radius) { // Solid
-				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
-				nLiq++;
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
 		}
-		unsigned int nTot = nSol+nLiq;
-		#ifdef MPI_VERSION
-		unsigned int mySol(nSol), myLiq(nLiq), myTot(nTot);
-		MPI::COMM_WORLD.Allreduce(&mySol, &nSol, 1, MPI_UNSIGNED, MPI_SUM);
-		MPI::COMM_WORLD.Allreduce(&myLiq, &nLiq, 1, MPI_UNSIGNED, MPI_SUM);
-		MPI::COMM_WORLD.Allreduce(&myTot, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
-		#endif
-		double C0 = (double(nLiq)*cBs + double(nSol)*cBl) / double(nSol+nLiq); // weighted average of solid + liquid
-		assert(C0>0.);
-		if (rank==0)
-			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
+		print_values(initGrid, rank);
 
 		output(initGrid,filename);
 
@@ -256,7 +236,7 @@ void generate(int dim, const char* filename)
 		}
 	} else if (dim==3) {
 		int L=64;
-		double radius=22.0;
+		double radius=10.0;
 		GRID3D initGrid(5,0,L,0,L,0,L);
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
@@ -266,28 +246,16 @@ void generate(int dim, const char* filename)
 			vector<int> x = position(initGrid,n);
 			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
 			if (r<radius) { // Solid
-				nSol++;
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
-				nLiq++;
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
 		}
-		unsigned int nTot = nSol+nLiq;
-		#ifdef MPI_VERSION
-		unsigned int mySol(nSol), myLiq(nLiq), myTot(nTot);
-		MPI::COMM_WORLD.Allreduce(&mySol, &nSol, 1, MPI_UNSIGNED, MPI_SUM);
-		MPI::COMM_WORLD.Allreduce(&myLiq, &nLiq, 1, MPI_UNSIGNED, MPI_SUM);
-		MPI::COMM_WORLD.Allreduce(&myTot, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
-		#endif
-		double C0 = (double(nLiq)*cBs + double(nSol)*cBl) / double(nSol+nLiq); // weighted average of solid + liquid
-		assert(C0>0.);
-		if (rank==0)
-			std::cout<<"System is "<<(100*nSol)/nTot<<"% solid, "<<(100*nLiq)/nTot<<"% liquid."<<std::endl;
+		print_values(initGrid, rank);
 
 		output(initGrid,filename);
 
@@ -419,31 +387,43 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
 		#endif
 		if (rank==0)
-			cfile<<ctot<<std::endl;
+			cfile<<ctot<<'\n';
 	}
 	if (rank==0)
 		cfile.close();
 
-	double ptot=0.0;
-	unsigned int ntot = nodes(oldGrid);
-	for (int n=0; n<nodes(oldGrid); n++)
-		ptot += oldGrid(n)[0];
-
-	#ifdef MPI_VERSION
-	unsigned int myP(ptot);
-	unsigned int myN(ntot);
-	MPI::COMM_WORLD.Allreduce(&myP, &ptot, 1, MPI_DOUBLE, MPI_SUM);
-	MPI::COMM_WORLD.Allreduce(&myN, &ntot, 1, MPI_UNSIGNED, MPI_SUM);
-	#endif
-	double wps = (100.0*ptot)/ntot;
-	double wpl = (100.0*(ntot-ptot))/ntot;
-	if (rank==0)
-		printf("System is %.2f%% solid, %.2f%% liquid (%.1f%% total).\n", wps, wpl, wps+wpl);
-
+	print_values(oldGrid, rank);
 }
 
 
 } // namespace MMSP
+
+template<int dim, typename T>
+void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int rank) {
+	double pTot=0.0;
+	double cTot=0.0;
+	unsigned int nTot = nodes(oldGrid);
+	for (int n=0; n<nodes(oldGrid); n++) {
+		pTot += oldGrid(n)[0];
+		cTot += oldGrid(n)[1];
+	}
+
+	#ifdef MPI_VERSION
+	double myP(pTot), myC(cTot);
+	unsigned int myN(nTot);
+	MPI::COMM_WORLD.Allreduce(&myP, &pTot, 1, MPI_DOUBLE, MPI_SUM);
+	MPI::COMM_WORLD.Allreduce(&myC, &cTot, 1, MPI_DOUBLE, MPI_SUM);
+	MPI::COMM_WORLD.Allreduce(&myN, &nTot, 1, MPI_UNSIGNED, MPI_SUM);
+	#endif
+	cTot /= nTot;
+	double wps = (100.0*pTot)/nTot;
+	double wpl = (100.0*(nTot-pTot))/nTot;
+	double fs = 100.0*(cTot - Cl_e())/(Cs_e()-Cl_e());
+	double fl = 100.0*(Cs_e() - cTot)/(Cs_e()-Cl_e());
+	if (rank==0)
+		printf("System has %.2f%% solid, %.2f%% liquid, and composition %.2f%% B. Equilibrium is %.2f%% solid, %.2f%% liquid.\n",
+		       wps, wpl, 100.0*cTot, fs, fl);
+}
 
 double fl(const double& c)
 {

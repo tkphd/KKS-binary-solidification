@@ -16,6 +16,8 @@ int main(int argc, char* argv[]) {
 		exit(-1);
 	}
 
+	const int scale = 50000; // resolution, for converting floats to integers
+
 	// help diagnostic
 	if (std::string(argv[1]) == "--help") {
 		std::cout << argv[0] << ": convert MMSP grid data to (p,c) points.\n";
@@ -141,45 +143,45 @@ int main(int argc, char* argv[]) {
 				if (dim == 1) {
 					MMSP::grid<1, MMSP::vector<float> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				} else if (dim == 2) {
 					MMSP::grid<2, MMSP::vector<float> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				} else if (dim == 3) {
 					MMSP::grid<3, MMSP::vector<float> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				}
 			}
 			if (double_type) {
 				if (dim == 1) {
 					MMSP::grid<1, MMSP::vector<double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				} else if (dim == 2) {
 					MMSP::grid<2, MMSP::vector<double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				} else if (dim == 3) {
 					MMSP::grid<3, MMSP::vector<double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				}
 			}
 			if (long_double_type) {
 				if (dim == 1) {
 					MMSP::grid<1, MMSP::vector<long double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				} else if (dim == 2) {
 					MMSP::grid<2, MMSP::vector<long double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				} else if (dim == 3) {
 					MMSP::grid<3, MMSP::vector<long double> > GRID(argv[1]);
 					for (int k = 0; k < MMSP::nodes(GRID); k++)
-						phase[int(10000*GRID(k)[0])].insert(int(10000*GRID(k)[1]));
+						phase[int(scale*GRID(k)[0])].insert(int(scale*GRID(k)[1]));
 				}
 			}
 		}
@@ -187,7 +189,7 @@ int main(int argc, char* argv[]) {
 
 	for (std::map<int,std::set<int> >::const_iterator j=phase.begin(); j!=phase.end(); j++)
 		for (std::set<int>::const_iterator i=j->second.begin(); i!=j->second.end(); i++)
-			output << double(j->first)/10000 << ',' << double(*i)/10000 << '\n';
+			output << double(j->first)/scale << ',' << double(*i)/scale << '\n';
 
 	output.close();
 	return 0;

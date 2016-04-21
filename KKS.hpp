@@ -75,3 +75,4 @@ void simple_progress(int step, int steps); // thread-compatible pared-down versi
 
 void export_energy(bool silent); // exports free energy curves to energy.csv
 
+template<int dim, typename T> void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int rank);
