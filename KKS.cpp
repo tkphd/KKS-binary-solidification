@@ -37,7 +37,8 @@ const double CFLc = 1.0/16.0; // controls diffusivity
 const double meshres = 0.075; // dx=dy
 const double eps_sq = 1.25;
 const double a_int = 2.5; // alpha, prefactor of interface width
-const double omega = 2.0*eps_sq*pow(a_int/(3.5*meshres),2.0);
+const double halfwidth = 7.0*meshres; // half the interface width
+const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFLp*pow(meshres,2.0)/eps_sq; // Co=1/32
 const double Dl = 2.0*CFLc*pow(meshres,2.0)/0.5; // diffusion constant in liquid
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions

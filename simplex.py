@@ -32,7 +32,7 @@ with open("energy.csv") as f:
 z = np.loadtxt('energy.csv',skiprows=1,usecols=range(1,ncol-1),delimiter=',')
 
 # Configure plot
-plt.rcParams['figure.figsize'] = (8.5, 8.0)
+#plt.rcParams['figure.figsize'] = (8.5, 8.0)
 plt.axis('equal')
 plt.xlabel(r'$\phi$',fontsize=14)
 plt.ylabel(r'$c$',fontsize=14)
@@ -52,9 +52,8 @@ fnames = glob.glob("data/planar/*.xy")
 n = len(fnames)
 for i in (1,n/2,n-1):
 	p,c = np.loadtxt(fnames[i], delimiter=',', unpack=True)
-	plt.plot(p,c,'.-',markersize=1,linewidth=0.5)
+	plt.plot(p,c,'.-',markersize=1.5,linewidth=1)
 
 # Save image and close
 plt.savefig('energy.png', dpi=600, bbox_inches='tight')
 plt.close()
-
