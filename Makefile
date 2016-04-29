@@ -15,6 +15,9 @@ pflags = $(flags) -include mpi.h
 KKS: KKS.cpp
 	$(compiler) $(flags) $< -o $@ -lz -fopenmp
 
+gKKS: KKS.cpp
+	g++ $(flags) $< -o $@ -lz -fopenmp
+
 parallel: KKS.cpp
 	$(pcompiler) $(pflags) $< -o $@ -lz
 
@@ -22,4 +25,4 @@ mmsp2pc: mmsp2pc.cpp
 	$(compiler) $(flags) $< -o $@ -lz
 
 clean:
-	rm -f KKS parallel
+	rm -f KKS gKKS parallel

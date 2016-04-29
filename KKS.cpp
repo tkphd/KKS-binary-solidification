@@ -36,7 +36,8 @@ const double CFLc = 1.0/16.0; // controls diffusivity
 // Kinetic and model parameters
 const double meshres = 0.075; // dx=dy
 const double eps_sq = 1.25;
-const double omega = 2.0*eps_sq/pow(7.0*meshres/2.5,2.0);
+const double a_int = 2.5; // alpha, prefactor of interface width
+const double omega = 2.0*eps_sq*pow(a_int/(3.5*meshres),2.0);
 const double dt = 2.0*CFLp*pow(meshres,2.0)/eps_sq; // Co=1/32
 const double Dl = 2.0*CFLc*pow(meshres,2.0)/0.5; // diffusion constant in liquid
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
@@ -51,9 +52,9 @@ const double dc = 1.0/LUTnc;
 
 // Newton-Raphson root finding parameters
 const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative scheme: reference table threshold
-const unsigned int fasloop = 1e7;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
+const unsigned int fasloop = 5e6;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
 const double reftol = 1.0e-8;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
-const double fastol = 1.0e-6;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
+const double fastol = 1.0e-7;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
@@ -161,7 +162,6 @@ void generate(int dim, const char* filename)
 	   3. Cl, fictitious composition of liquid
 	   4. Residual associated with Cs,Cl computation
 	 */
-	unsigned int nSol=0, nLiq=0;
 	if (dim==1) {
 		int L=512;
 		GRID1D initGrid(5,0,L);
@@ -199,18 +199,18 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L=64;
-		//int L=100;
-		GRID2D initGrid(5,0,3*L,0,2*L);
-		double radius = 10.0;
-		//double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
+		//GRID2D initGrid(5,0,L,0,L);
+		GRID2D initGrid(5,0,L,0,8);
+		//double radius = 20.0;
+		double radius = (g1(initGrid,0)-g0(initGrid,0))/4;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
-			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
+			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
 			if (r<radius) { // Solid
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
@@ -301,8 +301,8 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 	double dV=1.0;
 	for (int d=0; d<dim; d++) {
 		dx(oldGrid,d) = meshres;
-		dx(newGrid,d) = meshres;
-		dV *= meshres;
+		dx(newGrid,d) = dx(oldGrid,d);
+		dV *= dx(oldGrid,d);
 	}
 
 	std::ofstream cfile;
@@ -327,7 +327,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 			vector<T> laps = laplacian(oldGrid, x);
 			const T lapPhi = laps[0];
-			const T lapC   = laps[1];
+			//const T lapC   = laps[1];
 			const T lapCs  = laps[2];
 			const T lapCl  = laps[3];
 
@@ -351,16 +351,16 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			                                      + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
 
 
+			/*
 			// Update c (Eqn. 6.100)
 			const double div_Qh_gradCs   = ( Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*h(phi_old)      )*(gradPgradCs)
 			                               + Q(phi_old)*h(phi_old)*lapCs;
 			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*(gradPgradCl)
 			                               + Q(phi_old)*(1.0-h(phi_old))*lapCl;
-			/*
-			// Remove phi-dependence from Q, for testing ONLY
-			const double div_Qh_gradCs   = Q(0.5)*(hprime(phi_old)*(gradPgradCs) + h(phi_old)*lapCs);
-			const double div_Q1mh_gradCl = Q(0.5)*(-hprime(phi_old)*(gradPgradCl) + (1.0-h(phi_old))*lapCl);
 			*/
+			// Remove phi-dependence from Q, for testing ONLY
+			const double div_Qh_gradCs   = Q(0.5)*( hprime(phi_old)*(gradPgradCs) +      h(phi_old)*lapCs);
+			const double div_Q1mh_gradCl = Q(0.5)*(-hprime(phi_old)*(gradPgradCl) + (1.0-h(phi_old))*lapCl);
 
 			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
 
@@ -387,7 +387,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
 		#endif
 		if (rank==0)
-			cfile<<ctot<<'\n';
+			cfile<<ctot<<std::endl;
 	}
 	if (rank==0)
 		cfile.close();
@@ -590,13 +590,13 @@ void simple_progress(int step, int steps) {
 
 void export_energy(bool silent)
 {
-	const int nc=75;
-	const int np=75;
-	const double cmin=-0.0625, cmax=1.0625;
-	const double pmin=-0.3333, pmax=1.3333;
-
-	const double dc = (1.0/nc);
+	const int np=100;
+	const int nc=100;
 	const double dp = (1.0/np);
+	const double dc = (1.0/nc);
+	const double pmin=-dp, pmax=1.0+dp;
+	const double cmin=-dc, cmax=1.0+dc;
+
 
 	bool randomize=true;
 
