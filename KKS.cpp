@@ -331,16 +331,6 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T lapCs  = laps[2];
 			const T lapCl  = laps[3];
 
-			// No elegant way to compute dot product of gradients, so...
-			vector<vector<T> > grads = gradient(oldGrid, x);
-			double gradPgradCs = 0.0;
-			double gradPgradCl = 0.0;
-			for (int d=0; d<dim; d++) {
-				gradPgradCs += grads[d][0]*grads[d][2];
-				gradPgradCl += grads[d][0]*grads[d][3];
-			} // ... sorry you had to see that.
-
-
 			/* ============================= *
 			 * Solve the Equations of Motion *
 			 * ============================= */
@@ -351,22 +341,37 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			                                      + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
 
 
-			/*
 			// Update c (Eqn. 6.100)
-			const double div_Qh_gradCs   = ( Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*h(phi_old)      )*(gradPgradCs)
-			                               + Q(phi_old)*h(phi_old)*lapCs;
-			const double div_Q1mh_gradCl = (-Q(phi_old)*hprime(phi_old) + Qprime(phi_old)*(1.0-h(phi_old)))*(gradPgradCl)
-			                               + Q(phi_old)*(1.0-h(phi_old))*lapCl;
-			*/
-			// Remove phi-dependence from Q, for testing ONLY
-			const double div_Qh_gradCs   = Q(0.5)*( hprime(phi_old)*(gradPgradCs) +      h(phi_old)*lapCs);
-			const double div_Q1mh_gradCl = Q(0.5)*(-hprime(phi_old)*(gradPgradCl) + (1.0-h(phi_old))*lapCl);
+			// Compute divergence of Cs, Cl using half-steps in space for second-order accuracy
+			T divS = 0.0, divL = 0.0;
+			vector<int> s(x);
+			for (int d=0; d<dim; d++) {
+				// Get low values
+				s[d]--;
+				double MSl = Q(oldGrid(s)[0])*h(oldGrid(s)[0]);
+				double CSl = oldGrid(s)[2];
+				double MLl = Q(oldGrid(s)[0])*(1.0-h(oldGrid(s)[0]));
+				double CLl = oldGrid(s)[3];
+				// Get high values
+				s[d]+=2;
+				double MSh = Q(oldGrid(s)[0])*h(oldGrid(s)[0]);
+				double CSh = oldGrid(s)[2];
+				double MLh = Q(oldGrid(s)[0])*(1.0-h(oldGrid(s)[0]));
+				double CLh = oldGrid(s)[3];
+				// Get central values
+				s[d]--;
+				double MSc = Q(oldGrid(s)[0])*h(oldGrid(s)[0]);
+				double CSc = oldGrid(s)[2];
+				double MLc = Q(oldGrid(s)[0])*(1.0-h(oldGrid(s)[0]));
+				double CLc = oldGrid(s)[3];
 
-			newGrid(n)[1] = c_old + dt*Dl*(div_Qh_gradCs + div_Q1mh_gradCl);
+				// Put 'em all together
+				double hinv = 1.0/dx(oldGrid,d);
+				divS += hinv*( 0.5*hinv*(MSc+MSh)*(CSh-CSc) - 0.5*hinv*(MSl+MSc)*(CSc-CSl) );
+				divL += hinv*( 0.5*hinv*(MLc+MLh)*(CLh-CLc) - 0.5*hinv*(MLl+MLc)*(CLc-CLl) );
+			}
 
-			// KKS Eqn. 33
-			//newGrid(n)[1] = c_old + dt*Dl*(Q(phi_old)*lapC + Q(phi_old)*hprime(phi_old)*(Cl_old - Cs_old)*lapPhi);
-
+			newGrid(n)[1] = c_old + dt*Dl*(divS + divL);
 
 			// Update Cs, Cl
 			bool silent=true, randomize=false;
