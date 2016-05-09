@@ -37,7 +37,7 @@ const double CFLc = 1.0/16.0; // controls diffusivity
 const double meshres = 0.075; // dx=dy
 const double eps_sq = 1.25;
 const double a_int = 2.5; // alpha, prefactor of interface width
-const double halfwidth = 3.5*meshres; // half the interface width
+const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFLp*pow(meshres,2.0)/eps_sq; // Co=1/32
 const double Dl = 2.0*CFLc*pow(meshres,2.0)/0.5; // diffusion constant in liquid
@@ -200,18 +200,18 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L=64;
-		//GRID2D initGrid(5,0,L,0,L);
-		GRID2D initGrid(5,0,L,0,8);
-		//double radius = 20.0;
-		double radius = (g1(initGrid,0)-g0(initGrid,0))/4.5;
+		GRID2D initGrid(5,0,L,0,L);
+		//GRID2D initGrid(5,0,L,0,8);
+		double radius = 20.0;
+		//double radius = (g1(initGrid,0)-g0(initGrid,0))/4.5;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
 		double ctot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
-			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
+			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
 			if (r<radius) { // Solid
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
