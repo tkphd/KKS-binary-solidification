@@ -169,8 +169,11 @@ void generate(int dim, const char* filename)
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
-		double ctot = 0.0;
+		double ctot = 0.0, ftot = 0.0;
 		double radius=(g1(initGrid,0)-g0(initGrid,0))/4;
+		#ifndef MPI_VERSION
+		#pragma omp parallel for
+		#endif
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
@@ -183,36 +186,65 @@ void generate(int dim, const char* filename)
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid);
+			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid);
 		}
+		// Add gradient to ftot
+		for (int n=0; n<nodes(initGrid); n++) {
+			vector<int> s = position(initGrid,n);
+			double gradPsq = 0.0;
+			for (int d=0; d<1; d++) {
+				// Get low value
+				s[d]--;
+				double pl = initGrid(s)[0];
+				// Get high value
+				s[d]+=2;
+				double ph = initGrid(s)[0];
+				// Back to the middle
+				s[d]--;
+
+				// Put 'em together
+				double hinv = 1.0/(2.0*dx(initGrid,d));
+				gradPsq += pow(hinv*(ph - pl),2.0);
+			}
+			ftot += gradPsq*dx(initGrid);
+		}
+
 		print_values(initGrid, rank);
 
 		output(initGrid,filename);
 
 		#ifdef MPI_VERSION
 		double myct(ctot);
+		double myft(ftot);
 		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myft, &ftot, 1, MPI_DOUBLE, MPI_SUM);
 		#endif
 		if (rank==0) {
 			std::ofstream cfile("c.log");
-			cfile<<ctot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<std::endl;
 			cfile.close();
 		}
 
 	} else if (dim==2) {
-		int L=64;
+		int L = 64;
 		GRID2D initGrid(5,0,L,0,L);
 		//GRID2D initGrid(5,0,L,0,8);
-		double radius = 20.0;
+		//double radius = 20.0;
 		//double radius = (g1(initGrid,0)-g0(initGrid,0))/4.5;
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
-		double ctot = 0.0;
+		double ctot = 0.0, ftot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
+			double ra = 20.0, rb = 16.0, rc = 10.0, rd = 8.0;
+			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
 			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
-			if (r<radius) { // Solid
+			if ( (pow(x[0] - (ra+1    ),2)+pow(x[1] - (L-ra-1  ),2) < 1.0*ra*ra) ||
+			     (pow(x[0] - (L-rb-1  ),2)+pow(x[1] - (rb+1    ),2) < 1.0*rb*rb) ||
+			     (pow(x[0] - (0.25*L-4),2)+pow(x[1] - (0.25*L-4),2) < 1.0*rc*rc) ||
+			     (pow(x[0] - (0.75*L+2),2)+pow(x[1] - (0.75*L+2),2) < 1.0*rd*rd) )
+			{ // Solid
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
@@ -221,18 +253,42 @@ void generate(int dim, const char* filename)
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
+			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid);
 		}
+		// Add gradient to ftot
+		for (int n=0; n<nodes(initGrid); n++) {
+			vector<int> s = position(initGrid,n);
+			double gradPsq = 0.0;
+			for (int d=0; d<2; d++) {
+				// Get low value
+				s[d]--;
+				double pl = initGrid(s)[0];
+				// Get high value
+				s[d]+=2;
+				double ph = initGrid(s)[0];
+				// Back to the middle
+				s[d]--;
+
+				// Put 'em together
+				double hinv = 1.0/(2.0*dx(initGrid,d));
+				gradPsq += pow(hinv*(ph - pl),2.0);
+			}
+			ftot += gradPsq*dx(initGrid);
+		}
+
 		print_values(initGrid, rank);
 
 		output(initGrid,filename);
 
 		#ifdef MPI_VERSION
 		double myct(ctot);
+		double myft(ftot);
 		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myft, &ftot, 1, MPI_DOUBLE, MPI_SUM);
 		#endif
 		if (rank==0) {
 			std::ofstream cfile("c.log");
-			cfile<<ctot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<std::endl;
 			cfile.close();
 		}
 	} else if (dim==3) {
@@ -242,7 +298,7 @@ void generate(int dim, const char* filename)
 		for (int d=0; d<dim; d++)
 			dx(initGrid,d) = meshres;
 
-		double ctot = 0.0;
+		double ctot = 0.0, ftot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
@@ -255,18 +311,42 @@ void generate(int dim, const char* filename)
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
+			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid)*dz(initGrid);
 		}
+		// Add gradient to ftot
+		for (int n=0; n<nodes(initGrid); n++) {
+			vector<int> s = position(initGrid,n);
+			double gradPsq = 0.0;
+			for (int d=0; d<3; d++) {
+				// Get low value
+				s[d]--;
+				double pl = initGrid(s)[0];
+				// Get high value
+				s[d]+=2;
+				double ph = initGrid(s)[0];
+				// Back to the middle
+				s[d]--;
+
+				// Put 'em together
+				double hinv = 1.0/(2.0*dx(initGrid,d));
+				gradPsq += pow(hinv*(ph - pl),2.0);
+			}
+			ftot += gradPsq*dx(initGrid);
+		}
+
 		print_values(initGrid, rank);
 
 		output(initGrid,filename);
 
 		#ifdef MPI_VERSION
 		double myct(ctot);
+		double myft(ftot);
 		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myft, &ftot, 1, MPI_DOUBLE, MPI_SUM);
 		#endif
 		if (rank==0) {
 			std::ofstream cfile("c.log");
-			cfile<<ctot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<std::endl;
 			cfile.close();
 		}
 	} else {
@@ -314,6 +394,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 		if (rank==0)
 			print_progress(step, steps);
 
+		double ctot=0.0, ftot=0.0;
 		#ifndef MPI_VERSION
 		#pragma omp parallel for
 		#endif
@@ -344,20 +425,23 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 			// Update c (Eqn. 6.100)
 			// Compute divergence of Cs, Cl using half-steps in space for second-order accuracy
-			T divS = 0.0, divL = 0.0;
+			// ... and grad(phi)^2 for free energy computation
+			T divS = 0.0, divL = 0.0, gradPsq = 0.0;
 			vector<int> s(x);
 			for (int d=0; d<dim; d++) {
 				// Get low values
 				s[d]--;
-				double MSl = Q(oldGrid(s)[0])*h(oldGrid(s)[0]);
+				double pl = oldGrid(s)[0];
+				double MSl = Q(pl)*h(pl);
 				double CSl = oldGrid(s)[2];
-				double MLl = Q(oldGrid(s)[0])*(1.0-h(oldGrid(s)[0]));
+				double MLl = Q(pl)*(1.0-h(pl));
 				double CLl = oldGrid(s)[3];
 				// Get high values
 				s[d]+=2;
-				double MSh = Q(oldGrid(s)[0])*h(oldGrid(s)[0]);
+				double ph = oldGrid(s)[0];
+				double MSh = Q(ph)*h(ph);
 				double CSh = oldGrid(s)[2];
-				double MLh = Q(oldGrid(s)[0])*(1.0-h(oldGrid(s)[0]));
+				double MLh = Q(ph)*(1.0-h(ph));
 				double CLh = oldGrid(s)[3];
 				// Get central values
 				s[d]--;
@@ -370,6 +454,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				double hinv = 1.0/dx(oldGrid,d);
 				divS += hinv*( 0.5*hinv*(MSc+MSh)*(CSh-CSc) - 0.5*hinv*(MSl+MSc)*(CSc-CSl) );
 				divL += hinv*( 0.5*hinv*(MLc+MLh)*(CLh-CLc) - 0.5*hinv*(MLl+MLc)*(CLc-CLl) );
+				gradPsq += pow(0.5*hinv*(ph - pl),2.0);
 			}
 
 			newGrid(n)[1] = c_old + dt*Dl*(divS + divL);
@@ -379,21 +464,33 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			newGrid(n)[4] = interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
 			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
+			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
+			double myc = dV*newGrid(n)[1];
+			double myf = dV*(0.5*eps_sq*gradPsq + f(newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]));
+			#ifndef MPI_VERSION
+			#pragma omp critical
+			{
+			#endif
+			ctot += myc;
+			ftot += myf;
+			#ifndef MPI_VERSION
+			}
+			#endif
+
 			// ~ fin ~
 		}
 		swap(oldGrid,newGrid);
 		ghostswap(oldGrid);
 
 		// Compute total mass
-		double ctot=0.0;
-		for (int n=0; n<nodes(oldGrid); n++)
-			ctot += oldGrid(n)[1]*dV;
 		#ifdef MPI_VERSION
 		double myct(ctot);
+		double myft(ftot);
 		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myft, &ftot, 1, MPI_DOUBLE, MPI_SUM);
 		#endif
 		if (rank==0)
-			cfile<<ctot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<std::endl;
 	}
 	if (rank==0)
 		cfile.close();
