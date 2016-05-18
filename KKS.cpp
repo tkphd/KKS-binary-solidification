@@ -755,11 +755,11 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 		// copy current values as "old guesses"
 		T Cso = Cs;
 		T Clo = Cl;
-		double W = h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso);
+		double detJ = h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso); // determinant of the Jacobian matrix
 		f1 = h(p)*Cso + (1.0-h(p))*Clo - c;
 		f2 = dfs_dc(Cso) - dfl_dc(Clo);
-		T ds = (fabs(W)<epsilon)? 0.0: ( d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2)/W;
-		T dl = (fabs(W)<epsilon)? 0.0: (-d2fs_dc2(Cso)*f1 + h(p)*f2)/W;
+		T ds = (fabs(detJ)<epsilon)? 0.0: (d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2)/detJ;
+		T dl = (fabs(detJ)<epsilon)? 0.0: (d2fs_dc2(Cso)*f1 - h(p)*f2)/detJ;
 
 		Cs = Cso + ds;
 		Cl = Clo + dl;
@@ -770,9 +770,7 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 				Cs = double(rand())/RAND_MAX;
 				Cl = double(rand())/RAND_MAX;
 				resets++;
-			} /*else {
-				l=maxloops;
-			}*/
+			}
 		}
 
 		f1 = h(p)*Cs + (1.0-h(p))*Cl - c; // at convergence, this equals zero
