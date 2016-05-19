@@ -237,7 +237,8 @@ void generate(int dim, const char* filename)
 		double ctot = 0.0, ftot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			double ra = 20.0, rb = 16.0, rc = 10.0, rd = 8.0;
+			//double ra = 20.0, rb = 16.0, rc = 10.0, rd = 8.0;
+			double ra = 10.0, rb = 8.0, rc = 5.0, rd = 4.0;
 			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
 			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
 			if ( (pow(x[0] - (ra+1    ),2)+pow(x[1] - (L-ra-1  ),2) < 1.0*ra*ra) ||
