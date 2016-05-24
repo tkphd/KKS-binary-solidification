@@ -34,10 +34,10 @@ template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T 
 
 //double h(const double& p)     {return p;}// {return pow(p,3.0) * (6.0*pow(p,2.0)-15.0*p+10.0);}
 //double hprime(const double& p){return 1.0;}// {return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }
-double h(const double& p)     {return pow(p,3.0) * (6.0*pow(p,2.0)-15.0*p+10.0);}
+double h(const double& p)     {return pow(p,3.0) * (6.0*p*p-15.0*p+10.0);}
 double hprime(const double& p){return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }
 double g(const double& p)     {return pow(p,2.0) * pow(1.0-p,2.0);}
-double gprime(const double& p){return 2.0*p * (2.0*p-1.0)*(p-1.0);}
+double gprime(const double& p){return 2.0*p * (1.0-p)*(1.0-2.0*p);}
 
 double fl(const double& c);       // ideal solution model for liquid free energy density
 

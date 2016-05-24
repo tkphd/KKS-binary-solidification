@@ -30,8 +30,8 @@ const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 #endif
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
-const double CFLp = 1.0/30.0; // controls timestep
-const double CFLc = 1.0/30.0; // controls diffusivity
+const double CFLp = 1.0/20.0; // controls timestep
+const double CFLc = 1.0/20.0; // controls diffusivity
 
 // Kinetic and model parameters
 const double meshres = 0.075; // dx=dy
@@ -40,9 +40,8 @@ const double a_int = 2.5; // alpha, prefactor of interface width
 const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFLp*pow(meshres,2.0)/eps_sq; // Co=1/32
-const double Dl = 1.0; //2.0*CFLc*pow(meshres,2.0)/0.5; // diffusion constant in liquid
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = (Cse+Cle)/2.0 + 0.001;  // initial solid concentration
+const double cBs = (Cse+Cle)/2.0 + 0.01;  // initial solid concentration
 const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
@@ -203,8 +202,8 @@ void generate(int dim, const char* filename)
 				s[d]--;
 
 				// Put 'em together
-				double hinv = 1.0/(2.0*dx(initGrid,d));
-				gradPsq += pow(hinv*(ph - pl),2.0);
+				double weight = 1.0/(2.0*dx(initGrid,d));
+				gradPsq += pow(weight*(ph - pl),2.0);
 			}
 			ftot += gradPsq*dx(initGrid);
 		}
@@ -237,6 +236,7 @@ void generate(int dim, const char* filename)
 		double ctot = 0.0, ftot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
+			/*
 			//double ra = 20.0, rb = 16.0, rc = 10.0, rd = 8.0;
 			double ra = 10.0, rb = 8.0, rc = 5.0, rd = 4.0;
 			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
@@ -249,6 +249,16 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
+				initGrid(n)[0] = pl0;
+				initGrid(n)[1] = cBl;
+			}
+			*/
+			if (x[0] < L/2) {
+				// Solid
+				initGrid(n)[0] = ps0;
+				initGrid(n)[1] = cBs;
+			} else {
+				// Liquid
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
@@ -271,8 +281,8 @@ void generate(int dim, const char* filename)
 				s[d]--;
 
 				// Put 'em together
-				double hinv = 1.0/(2.0*dx(initGrid,d));
-				gradPsq += pow(hinv*(ph - pl),2.0);
+				double weight = 1.0/(2.0*dx(initGrid,d));
+				gradPsq += pow(weight*(ph - pl),2.0);
 			}
 			ftot += gradPsq*dx(initGrid);
 		}
@@ -329,8 +339,8 @@ void generate(int dim, const char* filename)
 				s[d]--;
 
 				// Put 'em together
-				double hinv = 1.0/(2.0*dx(initGrid,d));
-				gradPsq += pow(hinv*(ph - pl),2.0);
+				double weight = 1.0/(2.0*dx(initGrid,d));
+				gradPsq += pow(weight*(ph - pl),2.0);
 			}
 			ftot += gradPsq*dx(initGrid);
 		}
@@ -408,63 +418,70 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T Cs_old  = oldGrid(n)[2];
 			const T Cl_old  = oldGrid(n)[3];
 
-			vector<T> laps = laplacian(oldGrid, x);
-			const T lapPhi = laps[0];
-			//const T lapC   = laps[1];
-			const T lapCs  = laps[2];
-			const T lapCl  = laps[3];
 
-			/* ============================= *
-			 * Solve the Equations of Motion *
-			 * ============================= */
+			/* ================================== *
+			 * Solve the Equation of Motion for c *
+			 * ================================== */
 
 
-			// Update phi (Eqn. 6.97)
+			// Kim, Kim, & Suzuki: Eqn. 33
+			// Compute divergence of c, phi using half-steps in space for second-order accuracy
+			// ... and grad(phi)^2 for free energy computation
+
+			double divGradC = 0.0, divGradP = 0.0, lapPhi = 0.0, gradPsq = 0.0;
+			vector<int> s = x;
+			for (int d=0; d<dim; d++) {
+				// Get low values
+				s[d] -= 1;
+				const T& pl = oldGrid(s)[0];
+				const T& cl = oldGrid(s)[1];
+				const T& Sl = oldGrid(s)[2];
+				const T& Ll = oldGrid(s)[3];
+				const T Mpl = Q(pl)*hprime(pl)*(Ll-Sl);
+				const T Mcl = Q(pl);
+				// Get high values
+				s[d] += 2;
+				const T& ph = oldGrid(s)[0];
+				const T& ch = oldGrid(s)[1];
+				const T& Sh = oldGrid(s)[2];
+				const T& Lh = oldGrid(s)[3];
+				const T Mph = Q(ph)*hprime(ph)*(Lh-Sh);
+				const T Mch = Q(ph);
+				// Get central values
+				s[d] -= 1;
+				const T& pc = oldGrid(s)[0];
+				const T& cc = oldGrid(s)[1];
+				const T& Sc = oldGrid(s)[2];
+				const T& Lc = oldGrid(s)[3];
+				const T Mpc = Q(pc)*hprime(pc)*(Lc-Sc);
+				const T Mcc = Q(pc);
+
+				// Put 'em all together
+				double weight = 1.0/(dx(oldGrid,d) * dx(oldGrid,d));
+				divGradP += 0.5*weight*( (Mph+Mpc)*(ph-pc) - (Mpc+Mpl)*(pc-pl) );
+				divGradC += 0.5*weight*( (Mch+Mcc)*(ch-cc) - (Mcc+Mcl)*(cc-cl) );
+				lapPhi   += weight*(ph - 2.*pc + pl);
+				gradPsq  += pow(0.5*(ph - pl)/dx(oldGrid,d),2.0);
+			}
+
+			newGrid(n)[1] = c_old + dt*(divGradC + divGradP);
+
+
+			/* ==================================== *
+			 * Solve the Equation of Motion for phi *
+			 * ==================================== */
+
+
+			// Provatas & Elder: Eqn. 6.97
 			newGrid(n)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
 			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) ));
 
 
-			// Update c (KKS Eqn. 33)
-			// Compute divergence of c, phi using half-steps in space for second-order accuracy
-			// ... and grad(phi)^2 for free energy computation
-			double divGradC = 0.0, divGradP = 0.0, gradPsq = 0.0;
-			vector<int> s(x);
-			for (int d=0; d<dim; d++) {
-				// Get low values
-				s[d]--;
-				double pl = oldGrid(s)[0];
-				double cl = oldGrid(s)[1];
-				double CS = oldGrid(s)[2];
-				double CL = oldGrid(s)[3];
-				double Mpl = Q(pl)*hprime(pl)*(CL-CS);
-				double Mcl = Q(pl);
-				// Get high values
-				s[d]+=2;
-				double ph = oldGrid(s)[0];
-				double ch = oldGrid(s)[1];
-				       CS = oldGrid(s)[2];
-				       CL = oldGrid(s)[3];
-				double Mph = Q(ph)*hprime(ph)*(CL-CS);
-				double Mch = Q(ph);
-				// Get central values
-				s[d]--;
-				double pc = oldGrid(s)[0];
-				double cc = oldGrid(s)[1];
-				       CS = oldGrid(s)[2];
-				       CL = oldGrid(s)[3];
-				double Mpc = Q(pc)*hprime(pc)*(CL-CS);
-				double Mcc = Q(pc);
+			/* ============================== *
+			 * Determine consistent Cs and Cl *
+			 * ============================== */
 
-				// Put 'em all together
-				double hinv = 1.0/dx(oldGrid,d);
-				divGradP += 0.5*hinv*hinv*( (Mph+Mpc)*(ph-pc) - (Mpc+Mpl)*(pc-pl) );
-				divGradC += 0.5*hinv*hinv*( (Mch+Mcc)*(ch-cc) - (Mcc+Mcl)*(cc-cl) );
-				gradPsq += pow(0.5*hinv*(ph - pl),2.0);
-			}
 
-			newGrid(n)[1] = c_old + dt*Dl*(divGradC + divGradP);
-
-			// Update Cs, Cl
 			bool silent=true, randomize=false;
 			newGrid(n)[4] = interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
 			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
