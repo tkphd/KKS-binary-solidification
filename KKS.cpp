@@ -424,41 +424,45 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			                                      + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
 
 
-			// Update c (Eqn. 6.100)
-			// Compute divergence of Cs, Cl using half-steps in space for second-order accuracy
+			// Update c (KKS Eqn. 33)
+			// Compute divergence of c, phi using half-steps in space for second-order accuracy
 			// ... and grad(phi)^2 for free energy computation
-			T divS = 0.0, divL = 0.0, gradPsq = 0.0;
+			T divGradC = 0.0, divGradP = 0.0, gradPsq = 0.0;
 			vector<int> s(x);
 			for (int d=0; d<dim; d++) {
 				// Get low values
 				s[d]--;
 				double pl = oldGrid(s)[0];
-				double MSl = Q(pl)*h(pl);
-				double CSl = oldGrid(s)[2];
-				double MLl = Q(pl)*(1.0-h(pl));
-				double CLl = oldGrid(s)[3];
+				double cl = oldGrid(s)[1];
+				double CS = oldGrid(s)[2];
+				double CL = oldGrid(s)[3];
+				double Mpl = Q(pl)*hprime(pl)*(CL-CS);
+				double Mcl = Q(pl);
 				// Get high values
 				s[d]+=2;
 				double ph = oldGrid(s)[0];
-				double MSh = Q(ph)*h(ph);
-				double CSh = oldGrid(s)[2];
-				double MLh = Q(ph)*(1.0-h(ph));
-				double CLh = oldGrid(s)[3];
+				double ch = oldGrid(s)[1];
+				       CS = oldGrid(s)[2];
+				       CL = oldGrid(s)[3];
+				double Mph = Q(ph)*hprime(ph)*(CL-CS);
+				double Mch = Q(ph);
 				// Get central values
 				s[d]--;
-				double MSc = Q(oldGrid(s)[0])*h(oldGrid(s)[0]);
-				double CSc = oldGrid(s)[2];
-				double MLc = Q(oldGrid(s)[0])*(1.0-h(oldGrid(s)[0]));
-				double CLc = oldGrid(s)[3];
+				double pc = oldGrid(s)[0];
+				double cc = oldGrid(s)[1];
+				       CS = oldGrid(s)[2];
+				       CL = oldGrid(s)[3];
+				double Mpc = Q(pc)*hprime(pc)*(CL-CS);
+				double Mcc = Q(pc);
 
 				// Put 'em all together
 				double hinv = 1.0/dx(oldGrid,d);
-				divS += hinv*( 0.5*hinv*(MSc+MSh)*(CSh-CSc) - 0.5*hinv*(MSl+MSc)*(CSc-CSl) );
-				divL += hinv*( 0.5*hinv*(MLc+MLh)*(CLh-CLc) - 0.5*hinv*(MLl+MLc)*(CLc-CLl) );
+				divGradP += hinv*( 0.5*hinv*(Mph+Mpc)*(ph-pc) - 0.5*hinv*(Mpc+Mpl)*(pc-pl) );
+				divGradC += hinv*( 0.5*hinv*(Mch+Mcc)*(ch-cc) - 0.5*hinv*(Mcc+Mcl)*(cc-cl) );
 				gradPsq += pow(0.5*hinv*(ph - pl),2.0);
 			}
 
-			newGrid(n)[1] = c_old + dt*Dl*(divS + divL);
+			newGrid(n)[1] = c_old + dt*Dl*(divGradC + divGradP);
 
 			// Update Cs, Cl
 			bool silent=true, randomize=false;
