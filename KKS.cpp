@@ -30,8 +30,8 @@ const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 #endif
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
-const double CFLp = 1.0/16.0; // controls timestep
-const double CFLc = 1.0/16.0; // controls diffusivity
+const double CFLp = 1.0/30.0; // controls timestep
+const double CFLc = 1.0/30.0; // controls diffusivity
 
 // Kinetic and model parameters
 const double meshres = 0.075; // dx=dy
@@ -40,10 +40,10 @@ const double a_int = 2.5; // alpha, prefactor of interface width
 const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFLp*pow(meshres,2.0)/eps_sq; // Co=1/32
-const double Dl = 2.0*CFLc*pow(meshres,2.0)/0.5; // diffusion constant in liquid
+const double Dl = 1.0; //2.0*CFLc*pow(meshres,2.0)/0.5; // diffusion constant in liquid
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = (Cse+Cle)/2.0;  // initial solid concentration
-const double cBl = (Cse+Cle)/2.0;  // initial liquid concentration
+const double cBs = (Cse+Cle)/2.0 + 0.001;  // initial solid concentration
+const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
 const int LUTnc = 125; // number of points along c-axis
@@ -420,14 +420,14 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 
 			// Update phi (Eqn. 6.97)
-			newGrid(n)[0] = phi_old + (dt/omega)*( (eps_sq/omega)*lapPhi - gprime(phi_old)
-			                                      + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) )/omega );
+			newGrid(n)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
+			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) ));
 
 
 			// Update c (KKS Eqn. 33)
 			// Compute divergence of c, phi using half-steps in space for second-order accuracy
 			// ... and grad(phi)^2 for free energy computation
-			T divGradC = 0.0, divGradP = 0.0, gradPsq = 0.0;
+			double divGradC = 0.0, divGradP = 0.0, gradPsq = 0.0;
 			vector<int> s(x);
 			for (int d=0; d<dim; d++) {
 				// Get low values
@@ -457,8 +457,8 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 				// Put 'em all together
 				double hinv = 1.0/dx(oldGrid,d);
-				divGradP += hinv*( 0.5*hinv*(Mph+Mpc)*(ph-pc) - 0.5*hinv*(Mpc+Mpl)*(pc-pl) );
-				divGradC += hinv*( 0.5*hinv*(Mch+Mcc)*(ch-cc) - 0.5*hinv*(Mcc+Mcl)*(cc-cl) );
+				divGradP += 0.5*hinv*hinv*( (Mph+Mpc)*(ph-pc) - (Mpc+Mpl)*(pc-pl) );
+				divGradC += 0.5*hinv*hinv*( (Mch+Mcc)*(ch-cc) - (Mcc+Mcl)*(cc-cl) );
 				gradPsq += pow(0.5*hinv*(ph - pl),2.0);
 			}
 
