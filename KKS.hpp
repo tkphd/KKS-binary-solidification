@@ -23,53 +23,53 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T p, const T c, T& Cs, T& Cl, bool silent);
+template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T& p, const T& c, T& Cs, T& Cl, bool silent);
 
 /* Given const LUTGRID, phase fraction (p), and concentration (c), apply
  * linear interpolation to estimate Cs and Cl. For a dense LUT mesh, values
  * can be used directly. Otherwise, they serve as a good "best guess" for
  * iterative calculation, which should converge quickly.
  */
-template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl);
+template<class T> double interpolateConc(const LUTGRID& lut, const T& p, const T& c, T& Cs, T& Cl);
 
-//double h(const double& p)     {return p;}// {return pow(p,3.0) * (6.0*pow(p,2.0)-15.0*p+10.0);}
-//double hprime(const double& p){return 1.0;}// {return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }
-double h(const double& p)     {return pow(p,3.0) * (6.0*p*p-15.0*p+10.0);}
-double hprime(const double& p){return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }
-double g(const double& p)     {return pow(p,2.0) * pow(1.0-p,2.0);}
-double gprime(const double& p){return 2.0*p * (1.0-p)*(1.0-2.0*p);}
+double h(const double p)     {return pow(p,3.0) * (6.0*p*p - 15.0*p + 10.0);}
+double hprime(const double p){return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }
 
-double fl(const double& c);       // ideal solution model for liquid free energy density
+double g(const double p)     {return pow(p,2.0) * pow(1.0-p,2.0);}
+double gprime(const double p){return 2.0*p * (1.0-p)*(1.0-2.0*p);}
 
-double fs(const double& c);       // ideal solution model for solid free energy density
+double fl(const double c);       // ideal solution model for liquid free energy density
 
-double dfl_dc(const double& c);   // first derivative of fl w.r.t. c
+double fs(const double c);       // ideal solution model for solid free energy density
 
-double dfs_dc(const double& c);   // first derivative of fs w.r.t. c
+double dfl_dc(const double c);   // first derivative of fl w.r.t. c
 
-double d2fl_dc2(const double& c); // second derivative of fl w.r.t. c
+double dfs_dc(const double c);   // first derivative of fs w.r.t. c
 
-double d2fs_dc2(const double& c); // second derivative of fs w.r.t. c
+double d2fl_dc2(const double c); // second derivative of fl w.r.t. c
 
-double R(const double& p, const double& Cs, const double& Cl); // denominator for dCs, dCl, df
+double d2fs_dc2(const double c); // second derivative of fs w.r.t. c
 
-double dCl_dc(const double& p, const double& Cs, const double& Cl); // first derivative of Cl w.r.t. c
+double R(const double p, const double Cs, const double Cl); // denominator for dCs, dCl, df
 
-double dCs_dc(const double& p, const double& Cs, const double& Cl); // first derivative of Cs w.r.t. c
+double dCl_dc(const double p, const double Cs, const double Cl); // first derivative of Cl w.r.t. c
 
-double f(const double& p, const double& c, const double& Cs, const double& Cl); // free energy density
+double dCs_dc(const double p, const double Cs, const double Cl); // first derivative of Cs w.r.t. c
 
-double d2f_dc2(const double& p, const double& c, const double& Cs, const double& Cl); // second derivative of f w.r.t. c
+double f(const double p, const double c, const double Cs, const double Cl); // free energy density
+
+double d2f_dc2(const double p, const double c, const double Cs, const double Cl); // second derivative of f w.r.t. c
 
 double Cl_e(); // equilbrium Cl
 
 double Cs_e(); // equilbrium Cs
 
-double k();                       // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
+double k(const double Cs, const double Cl){return Cs/Cl;} // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
 
-double Q(const double& p){return (1.0-p)/(1.0+k() - (1.0-k())*p);}
+double Q(const double p, const double Cs, const double Cl){return 0.01 + (1.0-p)/(1.0 + k(Cs, Cl) - (1.0-k(Cs, Cl))*p);}
 
-double Qprime(const double& p){return (-(1.0+k() - (1.0-k())*p)-(1.0-p)*(k()-1.0))/pow(1.0+k() - (1.0-k())*p,2.0);}
+double Qprime(const double p, const double Cs, const double Cl){return (-(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p)-(1.0-p)*(k(Cs, Cl)-1.0))
+                                       / pow(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p,2.0);}
 
 void simple_progress(int step, int steps); // thread-compatible pared-down version of print_progress
 

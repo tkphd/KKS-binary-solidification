@@ -30,16 +30,15 @@ const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 #endif
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
-const double CFLp = 1.0/20.0; // controls timestep
-const double CFLc = 1.0/20.0; // controls diffusivity
+const double CFL = 1.0/30.0; // controls timestep
 
 // Kinetic and model parameters
 const double meshres = 0.075; // dx=dy
 const double eps_sq = 1.25;
 const double a_int = 2.5; // alpha, prefactor of interface width
-const double halfwidth = 2.25*meshres; // half the interface width
+const double halfwidth = /*2.25*/ 4.0*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
-const double dt = 2.0*CFLp*pow(meshres,2.0)/eps_sq; // Co=1/32
+const double dt = 2.0*CFL*pow(meshres,2.0)/eps_sq; // Co=1/32
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
 const double cBs = (Cse+Cle)/2.0 + 0.01;  // initial solid concentration
 const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
@@ -165,8 +164,13 @@ void generate(int dim, const char* filename)
 	if (dim==1) {
 		int L=512;
 		GRID1D initGrid(5,0,L);
-		for (int d=0; d<dim; d++)
+		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
+			if (x0(initGrid,d)==g0(initGrid,d))
+				b0(initGrid,d) = Neumann;
+			else if (x1(initGrid,d)==g1(initGrid,d))
+				b1(initGrid,d) = Neumann;
+		}
 
 		double ctot = 0.0, ftot = 0.0;
 		double radius=(g1(initGrid,0)-g0(initGrid,0))/4;
@@ -184,6 +188,7 @@ void generate(int dim, const char* filename)
 				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid);
 		}
@@ -226,33 +231,35 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L = 64;
-		GRID2D initGrid(5,0,L,0,L);
-		//GRID2D initGrid(5,0,L,0,8);
-		//double radius = 20.0;
-		//double radius = (g1(initGrid,0)-g0(initGrid,0))/4.5;
-		for (int d=0; d<dim; d++)
+		GRID2D initGrid(5,0,L,0,L/2);
+		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
+			if (x0(initGrid,d)==g0(initGrid,d))
+				b0(initGrid,d) = Neumann;
+			else if (x1(initGrid,d)==g1(initGrid,d))
+				b1(initGrid,d) = Neumann;
+		}
 
 		double ctot = 0.0, ftot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			/*
-			//double ra = 20.0, rb = 16.0, rc = 10.0, rd = 8.0;
-			double ra = 10.0, rb = 8.0, rc = 5.0, rd = 4.0;
-			//double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
-			//double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
-			if ( (pow(x[0] - (ra+1    ),2)+pow(x[1] - (L-ra-1  ),2) < 1.0*ra*ra) ||
-			     (pow(x[0] - (L-rb-1  ),2)+pow(x[1] - (rb+1    ),2) < 1.0*rb*rb) ||
-			     (pow(x[0] - (0.25*L-4),2)+pow(x[1] - (0.25*L-4),2) < 1.0*rc*rc) ||
-			     (pow(x[0] - (0.75*L+2),2)+pow(x[1] - (0.75*L+2),2) < 1.0*rd*rd) )
-			{ // Solid
+			/**/
+			double ra = 15.0, rb = 8.0, rc = 8.0;
+			// Circular interfaces
+			if ( (pow(x[0] - (ra+1   ),2) + pow(x[1] - (L/2-ra-1  ),2) < ra*ra) ||
+			     (pow(x[0] - 0.625*(L),2) + pow(x[1] - (L/2-rb-1  ),2) < rb*rb) ||
+			     (pow(x[0] - (L-rc-1 ),2) + pow(x[1] - (rc+1),2) < rc*rc)
+			) {
+				// Solid
 				initGrid(n)[0] = ps0;
 				initGrid(n)[1] = cBs;
 			} else {
+				// Liquid
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
-			*/
+			/*
+			// Planar interface
 			if (x[0] < L/2) {
 				// Solid
 				initGrid(n)[0] = ps0;
@@ -262,7 +269,9 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
+			*/
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid);
 		}
@@ -306,8 +315,13 @@ void generate(int dim, const char* filename)
 		int L=64;
 		double radius=10.0;
 		GRID3D initGrid(5,0,L,0,L,0,L);
-		for (int d=0; d<dim; d++)
+		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
+			if (x0(initGrid,d)==g0(initGrid,d))
+				b0(initGrid,d) = Neumann;
+			else if (x1(initGrid,d)==g1(initGrid,d))
+				b1(initGrid,d) = Neumann;
+		}
 
 		double ctot = 0.0, ftot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
@@ -321,6 +335,7 @@ void generate(int dim, const char* filename)
 				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid)*dz(initGrid);
 		}
@@ -393,8 +408,15 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 	double dV=1.0;
 	for (int d=0; d<dim; d++) {
 		dx(oldGrid,d) = meshres;
-		dx(newGrid,d) = dx(oldGrid,d);
+		dx(newGrid,d) = meshres;
 		dV *= dx(oldGrid,d);
+		if (x0(oldGrid,d) == g0(oldGrid,d)) {
+			b0(oldGrid,d) = Neumann;
+			b0(newGrid,d) = Neumann;
+		} else if (x1(oldGrid,d) == g1(oldGrid,d)) {
+			b1(oldGrid,d) = Neumann;
+			b1(newGrid,d) = Neumann;
+		}
 	}
 
 	std::ofstream cfile;
@@ -418,18 +440,15 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T Cs_old  = oldGrid(n)[2];
 			const T Cl_old  = oldGrid(n)[3];
 
+			// Compute divergence of c, phi using half-steps in space for second-order accuracy,
+			// laplacian of phi (alone, since built-in Laplacian returns all fields),
+			// and grad(phi)^2 for free energy computation
 
-			/* ================================== *
-			 * Solve the Equation of Motion for c *
-			 * ================================== */
-
-
-			// Kim, Kim, & Suzuki: Eqn. 33
-			// Compute divergence of c, phi using half-steps in space for second-order accuracy
-			// ... and grad(phi)^2 for free energy computation
-
-			double divGradC = 0.0, divGradP = 0.0, lapPhi = 0.0, gradPsq = 0.0;
-			vector<int> s = x;
+			double divGradP = 0.0;
+			double divGradC = 0.0;
+			double lapPhi = 0.0;
+			double gradPsq = 0.0;
+			vector<int> s(x);
 			for (int d=0; d<dim; d++) {
 				// Get low values
 				s[d] -= 1;
@@ -437,44 +456,48 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				const T& cl = oldGrid(s)[1];
 				const T& Sl = oldGrid(s)[2];
 				const T& Ll = oldGrid(s)[3];
-				const T Mpl = Q(pl)*hprime(pl)*(Ll-Sl);
-				const T Mcl = Q(pl);
+				const T Mpl = Q(pl,Sl,Ll)*hprime(pl)*(Ll-Sl);
+				const T Mcl = Q(pl,Sl,Ll);
 				// Get high values
 				s[d] += 2;
 				const T& ph = oldGrid(s)[0];
 				const T& ch = oldGrid(s)[1];
 				const T& Sh = oldGrid(s)[2];
 				const T& Lh = oldGrid(s)[3];
-				const T Mph = Q(ph)*hprime(ph)*(Lh-Sh);
-				const T Mch = Q(ph);
+				const T Mph = Q(ph,Sh,Lh)*hprime(ph)*(Lh-Sh);
+				const T Mch = Q(ph,Sh,Lh);
 				// Get central values
 				s[d] -= 1;
 				const T& pc = oldGrid(s)[0];
 				const T& cc = oldGrid(s)[1];
 				const T& Sc = oldGrid(s)[2];
 				const T& Lc = oldGrid(s)[3];
-				const T Mpc = Q(pc)*hprime(pc)*(Lc-Sc);
-				const T Mcc = Q(pc);
+				const T Mpc = Q(pc,Sc,Lc)*hprime(pc)*(Lc-Sc);
+				const T Mcc = Q(pc,Sc,Lc);
 
 				// Put 'em all together
-				double weight = 1.0/(dx(oldGrid,d) * dx(oldGrid,d));
+				double weight = 1.0/pow(dx(oldGrid,d), 2.0);
 				divGradP += 0.5*weight*( (Mph+Mpc)*(ph-pc) - (Mpc+Mpl)*(pc-pl) );
 				divGradC += 0.5*weight*( (Mch+Mcc)*(ch-cc) - (Mcc+Mcl)*(cc-cl) );
 				lapPhi   += weight*(ph - 2.*pc + pl);
-				gradPsq  += pow(0.5*(ph - pl)/dx(oldGrid,d),2.0);
+				gradPsq  += pow(0.5*(ph - pl)/dx(oldGrid,d), 2.0);
 			}
-
-			newGrid(n)[1] = c_old + dt*(divGradC + divGradP);
-
 
 			/* ==================================== *
 			 * Solve the Equation of Motion for phi *
 			 * ==================================== */
 
-
 			// Provatas & Elder: Eqn. 6.97
 			newGrid(n)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
 			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) ));
+
+
+			/* ================================== *
+			 * Solve the Equation of Motion for c *
+			 * ================================== */
+
+			// Kim, Kim, & Suzuki: Eqn. 33
+			newGrid(n)[1] = c_old + dt*(divGradC + divGradP);
 
 
 			/* ============================== *
@@ -483,8 +506,10 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 
 			bool silent=true, randomize=false;
+			newGrid(n)[2] = Cs_old;
+			newGrid(n)[3] = Cl_old;
 			newGrid(n)[4] = interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
+			//newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
 			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
 			double myc = dV*newGrid(n)[1];
@@ -550,7 +575,7 @@ void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int ran
 		       wps, wpl, 100.0*cTot, fs, fl);
 }
 
-double fl(const double& c)
+double fl(const double c)
 {
 	#ifdef CALPHAD
 	// 10-th order polynomial fit to S. an Mey Cu-Ni CALPHAD database
@@ -570,7 +595,7 @@ double fl(const double& c)
 	#endif
 }
 
-double fs(const double& c)
+double fs(const double c)
 {
 	#ifdef CALPHAD
 	// 10-th order polynomial fit to S. an Mey Cu-Ni CALPHAD database
@@ -591,7 +616,7 @@ double fs(const double& c)
 }
 
 
-double dfl_dc(const double& c)
+double dfl_dc(const double c)
 {
 	#ifdef CALPHAD
 	return  10.0*calCl[0]*pow(c,9)
@@ -609,7 +634,7 @@ double dfl_dc(const double& c)
 	#endif
 }
 
-double dfs_dc(const double& c)
+double dfs_dc(const double c)
 {
 	#ifdef CALPHAD
 	return  10.0*calCs[0]*pow(c,9)
@@ -627,7 +652,7 @@ double dfs_dc(const double& c)
 	#endif
 }
 
-double d2fl_dc2(const double& c)
+double d2fl_dc2(const double c)
 {
 	#ifdef CALPHAD
 	return  90.0*calCl[0]*pow(c,8)
@@ -644,7 +669,7 @@ double d2fl_dc2(const double& c)
 	#endif
 }
 
-double d2fs_dc2(const double& c)
+double d2fs_dc2(const double c)
 {
 	#ifdef CALPHAD
 	return  90.0*calCs[0]*pow(c,8)
@@ -661,20 +686,20 @@ double d2fs_dc2(const double& c)
 	#endif
 }
 
-double R(const double& p, const double& Cs, const double& Cl)
+double R(const double p, const double Cs, const double Cl)
 {
 	// denominator for dCs, dCl, df
 	return h(p)*d2fl_dc2(Cl) + (1.0-h(p))*d2fs_dc2(Cs);
 }
 
-double dCl_dc(const double& p, const double& Cs, const double& Cl)
+double dCl_dc(const double p, const double Cs, const double Cl)
 {
 	double invR = R(p, Cs, Cl);
 	if (fabs(invR)>epsilon) invR = 1.0/invR;
 	return d2fl_dc2(Cl)*invR;
 }
 
-double dCs_dc(const double& p, const double& Cs, const double& Cl)
+double dCs_dc(const double p, const double Cs, const double Cl)
 {
 	double invR = R(p, Cs, Cl);
 	if (fabs(invR)>epsilon) invR = 1.0/invR;
@@ -685,19 +710,13 @@ double Cl_e() {return Cle;}
 
 double Cs_e() {return Cse;}
 
-double k()
-{
-	// Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
-	return Cs_e()/Cl_e();
-}
-
-double f(const double& p, const double& c, const double& Cs, const double& Cl)
+double f(const double p, const double c, const double Cs, const double Cl)
 {
 	//const double w = 1.0; // well barrier height
 	return omega*g(p) + h(p)*fs(Cs) + (1.0-h(p))*fl(Cl);
 }
 
-double d2f_dc2(const double& p, const double& c, const double& Cs, const double& Cl)
+double d2f_dc2(const double p, const double c, const double Cs, const double Cl)
 {
 	double invR = R(p, Cs, Cl);
 	if (fabs(invR)>epsilon) invR = 1.0/invR;
@@ -748,6 +767,11 @@ void export_energy(bool silent)
 	ef.close();
 }
 
+template <class T>
+double F1(const T& p, const T& c, const T& Cs, const T& Cl){return h(p)*Cs + (1.0-h(p))*Cl - c;}
+
+template <class T>
+double F2(const T& Cs, const T& Cl){return dfs_dc(Cs) - dfl_dc(Cl);}
 
 /* Given const phase fraction (p) and concentration (c), iteratively determine
  * the solid (Cs) and liquid (Cl) fictitious concentrations that satisfy the
@@ -755,18 +779,19 @@ void export_energy(bool silent)
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T p, const T c, T& Cs, T& Cl, bool silent)
+template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T& p, const T& c, T& Cs, T& Cl, bool silent)
 {
 	int rank=0;
 	#ifdef MPI_VERSION
 	rank=MPI::COMM_WORLD.Get_rank();
 	#endif
 
-	double f1 = h(p)*Cs + (1.0-h(p))*Cl - c;
-	double f2 = dfs_dc(Cs) - dfl_dc(Cl);
-	double res = std::sqrt(pow(f1,2.0) + pow(f2,2.0)); // initial residual
+	double res = std::sqrt(pow(F1(p,c,Cs,Cl),2.0) + pow(F2(Cs,Cl),2.0)); // initial residual
 
-	double bestCs(c), bestCl(c), bestRes(res);
+	double bestCs = Cs;
+	double bestCl = Cl;
+	double bestRes = res;
+
 	const double cmin(-5.0), cmax(6.0); // min, max values for Cs, Cl before triggering random re-initialization
 
 	// Iterate until either the matrix is solved (residual<tolerance)
@@ -777,27 +802,21 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 		// copy current values as "old guesses"
 		T Cso = Cs;
 		T Clo = Cl;
-		double detJ = h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso); // determinant of the Jacobian matrix
-		f1 = h(p)*Cso + (1.0-h(p))*Clo - c;
-		f2 = dfs_dc(Cso) - dfl_dc(Clo);
-		T ds = (fabs(detJ)<epsilon)? 0.0: (d2fl_dc2(Clo)*f1 + (1.0-h(p))*f2)/detJ;
-		T dl = (fabs(detJ)<epsilon)? 0.0: (d2fs_dc2(Cso)*f1 - h(p)*f2)/detJ;
+		T weight = 1.0 / ( h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso) ); // determinant of the Jacobian matrix
+		T ds = d2fl_dc2(Clo)*F1(p,c,Cso,Clo) + (1.0-h(p))*F2(Cso,Clo);
+		T dl = d2fs_dc2(Cso)*F1(p,c,Cso,Clo) -      h(p) *F2(Cso,Clo);
 
-		Cs = Cso + ds;
-		Cl = Clo + dl;
-		if (Cs<cmin || Cs>cmax || Cl<cmin || Cl>cmax) {
-			if (randomize) {
-				// If Newton falls out of bounds, shake everything up.
-				// Helps the numerics, but won't fix fundamental problems.
-				Cs = double(rand())/RAND_MAX;
-				Cl = double(rand())/RAND_MAX;
-				resets++;
-			}
+		Cs = Cso + weight * ds;
+		Cl = Clo + weight * dl;
+		if (randomize && (Cs<cmin || Cs>cmax || Cl<cmin || Cl>cmax)) {
+			// If Newton falls out of bounds, shake everything up.
+			// Helps the numerics, but won't fix fundamental problems.
+			Cs = double(rand())/RAND_MAX;
+			Cl = double(rand())/RAND_MAX;
+			resets++;
 		}
 
-		f1 = h(p)*Cs + (1.0-h(p))*Cl - c; // at convergence, this equals zero
-		f2 = dfs_dc(Cs) - dfl_dc(Cl);     // this, too
-		res = std::sqrt(pow(f1,2.0) + pow(f2,2.0));
+		res = std::sqrt(pow(F1(p,c,Cs,Cl),2.0) + pow(F2(Cs,Cl),2.0));
 
 		if (res < bestRes) {
 			bestCs = Cs;
@@ -819,16 +838,16 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	return res;
 }
 
-template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T c, T& Cs, T& Cl)
+template<class T> double interpolateConc(const LUTGRID& lut, const T& p, const T& c, T& Cs, T& Cl)
 {
 	// Determine indices in (p,c) space for LUT access
-	int idp_lo = int( (p+dp)*(LUTnp+2)/(1.0+2.0*dp) );
-	int idc_lo = int( (c+dc)*(LUTnc+2)/(1.0+2.0*dc) );
-	if (idp_lo>LUTnp+1)
+	int idp_lo = int( double(p+dp)*double(LUTnp+2)/(1.0+2.0*dp) );
+	int idc_lo = int( double(c+dc)*double(LUTnc+2)/(1.0+2.0*dc) );
+	if (idp_lo>LUTnp)
 		idp_lo = LUTnp;
 	if (idp_lo<-1)
 		idp_lo = -1;
-	if (idc_lo>LUTnc+1)
+	if (idc_lo>LUTnc)
 		idc_lo = LUTnc;
 	if (idc_lo<-1)
 		idc_lo = -1;
@@ -836,10 +855,10 @@ template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T 
 	int idc_hi = idc_lo+1;
 
 	// Bound p,c in LUT neighborhood
-	const double p_lo = dp*idp_lo;
-	const double p_hi = dp*idp_hi;
-	const double c_lo = dc*idc_lo;
-	const double c_hi = dc*idc_hi;
+	const double p_lo = dp*(idp_lo-1);
+	const double p_hi = dp*(idp_hi-1);
+	const double c_lo = dc*(idc_lo-1);
+	const double c_hi = dc*(idc_hi-1);
 
 	if (1) { // Interpolate Cs
 		// Determine limiting values of Cs at corners
@@ -888,7 +907,8 @@ template<class T> double interpolateConc(const LUTGRID& lut, const T p, const T 
 			     )/((p_hi-p_lo)*(c_hi-c_lo));
 		}
 	}
-	return std::max(std::max(lut[idp_lo][idc_lo][2], lut[idp_lo][idc_hi][2]), std::max(lut[idp_hi][idc_lo][2], lut[idp_hi][idc_hi][2]));
+	return std::max(std::max(lut[idp_lo][idc_lo][2], lut[idp_lo][idc_hi][2]),
+	                std::max(lut[idp_hi][idc_lo][2], lut[idp_hi][idc_hi][2]));
 }
 #endif
 
