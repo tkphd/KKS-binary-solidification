@@ -30,18 +30,18 @@ const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 #endif
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
-const double CFL = 1.0/30.0; // controls timestep
+const double CFL = 1.0/300.0; // controls timestep
 
 // Kinetic and model parameters
 const double meshres = 0.075; // dx=dy
 const double eps_sq = 1.25;
 const double a_int = 2.5; // alpha, prefactor of interface width
-const double halfwidth = /*2.25*/ 4.0*meshres; // half the interface width
+const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
-const double dt = 2.0*CFL*pow(meshres,2.0)/eps_sq; // Co=1/32
+const double dt = 2.0*CFL*pow(meshres,2.0)/eps_sq;
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = (Cse+Cle)/2.0 + 0.01;  // initial solid concentration
-const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
+const double cBs = (Cse+Cle)/2.0 /*+ 0.01*/;  // initial solid concentration
+const double cBl = (Cse+Cle)/2.0 /*- 0.001*/;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
 const int LUTnc = 125; // number of points along c-axis
@@ -450,37 +450,115 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			double gradPsq = 0.0;
 			vector<int> s(x);
 			for (int d=0; d<dim; d++) {
-				// Get low values
-				s[d] -= 1;
-				const T& pl = oldGrid(s)[0];
-				const T& cl = oldGrid(s)[1];
-				const T& Sl = oldGrid(s)[2];
-				const T& Ll = oldGrid(s)[3];
-				const T Mpl = Q(pl,Sl,Ll)*hprime(pl)*(Ll-Sl);
-				const T Mcl = Q(pl,Sl,Ll);
-				// Get high values
-				s[d] += 2;
-				const T& ph = oldGrid(s)[0];
-				const T& ch = oldGrid(s)[1];
-				const T& Sh = oldGrid(s)[2];
-				const T& Lh = oldGrid(s)[3];
-				const T Mph = Q(ph,Sh,Lh)*hprime(ph)*(Lh-Sh);
-				const T Mch = Q(ph,Sh,Lh);
-				// Get central values
-				s[d] -= 1;
-				const T& pc = oldGrid(s)[0];
-				const T& cc = oldGrid(s)[1];
-				const T& Sc = oldGrid(s)[2];
-				const T& Lc = oldGrid(s)[3];
-				const T Mpc = Q(pc,Sc,Lc)*hprime(pc)*(Lc-Sc);
-				const T Mcc = Q(pc,Sc,Lc);
-
-				// Put 'em all together
+				// Second-order differencing requires consistent schemes at the boundaries.
+				// Implemented after Strikwerda 2004 (p. 152) and KTH CFD coursenotes,
+				//     http://www.mech.kth.se/~ardeshir/courses/literature/fd.pdf
+				// with guessed handling of variable coefficients
 				double weight = 1.0/pow(dx(oldGrid,d), 2.0);
-				divGradP += 0.5*weight*( (Mph+Mpc)*(ph-pc) - (Mpc+Mpl)*(pc-pl) );
-				divGradC += 0.5*weight*( (Mch+Mcc)*(ch-cc) - (Mcc+Mcl)*(cc-cl) );
-				lapPhi   += weight*(ph - 2.*pc + pl);
-				gradPsq  += pow(0.5*(ph - pl)/dx(oldGrid,d), 2.0);
+
+				if (x[d]==x0(oldGrid,d) && b0(oldGrid,d) == Neumann) {
+					// Based on the "Right-sided second order difference"
+					// Get central values
+					const T& p0 = oldGrid(s)[0];
+					const T& c0 = oldGrid(s)[1];
+					const T& S0 = oldGrid(s)[2];
+					const T& L0 = oldGrid(s)[3];
+					const T Mp0 = Q(p0,S0,L0)*hprime(p0)*(L0-S0);
+					const T Mc0 = Q(p0,S0,L0);
+					// Get middle values
+					s[d] += 1;
+					const T& p1 = oldGrid(s)[0];
+					const T& c1 = oldGrid(s)[1];
+					const T& S1 = oldGrid(s)[2];
+					const T& L1 = oldGrid(s)[3];
+					const T Mp1 = Q(p1,S1,L1)*hprime(p1)*(L1-S1);
+					const T Mc1 = Q(p1,S1,L1);
+					// Get high values
+					s[d] += 1;
+					const T& p2 = oldGrid(s)[0];
+					const T& c2 = oldGrid(s)[1];
+					const T& S2 = oldGrid(s)[2];
+					const T& L2 = oldGrid(s)[3];
+					const T Mp2 = Q(p2,S2,L2)*hprime(p2)*(L2-S2);
+					const T Mc2 = Q(p2,S2,L2);
+					// Get very high value
+					s[d] += 1;
+					const T& p3 = oldGrid(s)[0];
+
+					// Re-center and put 'em all together
+					s[d] -= 3;
+
+					divGradP += 0.25*weight*( 3.0*(Mp1+Mp0)*(p1-p0) - (Mp2+Mp1)*(p2-p1) );
+					divGradC += 0.25*weight*( 3.0*(Mc1+Mc0)*(c1-c0) - (Mc2+Mc1)*(c2-c1) );
+					lapPhi   += weight*(2.0*p0 - 5.0*p1 + 4.0*p2 - p3);
+				} else if (x[d]==x1(oldGrid,d)-1 && b1(oldGrid,d)==Neumann) {
+					// Based on the "Left-sided second order difference"
+					// Get central values
+					const T& p3 = oldGrid(s)[0];
+					const T& c3 = oldGrid(s)[1];
+					const T& S3 = oldGrid(s)[2];
+					const T& L3 = oldGrid(s)[3];
+					const T Mp3 = Q(p3,S3,L3)*hprime(p3)*(L3-S3);
+					const T Mc3 = Q(p3,S3,L3);
+					// Get middle values
+					s[d] -= 1;
+					const T& p2 = oldGrid(s)[0];
+					const T& c2 = oldGrid(s)[1];
+					const T& S2 = oldGrid(s)[2];
+					const T& L2 = oldGrid(s)[3];
+					const T Mp2 = Q(p2,S2,L2)*hprime(p2)*(L2-S2);
+					const T Mc2 = Q(p2,S2,L2);
+					// Get low values
+					s[d] -= 1;
+					const T& p1 = oldGrid(s)[0];
+					const T& c1 = oldGrid(s)[1];
+					const T& S1 = oldGrid(s)[2];
+					const T& L1 = oldGrid(s)[3];
+					const T Mp1 = Q(p1,S1,L1)*hprime(p1)*(L1-S1);
+					const T Mc1 = Q(p1,S1,L1);
+					// Get very low value
+					s[d] -= 1;
+					const T& p0 = oldGrid(s)[0];
+
+					// Re-center and put 'em all together
+					s[d] += 3;
+
+					divGradP += 0.25*weight*( 3.0*(Mp3+Mp2)*(p3-p2) - (Mp2+Mp1)*(p2-p1) );
+					divGradC += 0.25*weight*( 3.0*(Mc3+Mc2)*(c3-c2) - (Mc2+Mc1)*(c2-c1) );
+					lapPhi   += weight*(2.0*p3 - 5.0*p2 + 4.0*p1 - p0);
+				} else {
+					// Central second-order difference
+					// Get low values
+					s[d] -= 1;
+					const T& pl = oldGrid(s)[0];
+					const T& cl = oldGrid(s)[1];
+					const T& Sl = oldGrid(s)[2];
+					const T& Ll = oldGrid(s)[3];
+					const T Mpl = Q(pl,Sl,Ll)*hprime(pl)*(Ll-Sl);
+					const T Mcl = Q(pl,Sl,Ll);
+					// Get high values
+					s[d] += 2;
+					const T& ph = oldGrid(s)[0];
+					const T& ch = oldGrid(s)[1];
+					const T& Sh = oldGrid(s)[2];
+					const T& Lh = oldGrid(s)[3];
+					const T Mph = Q(ph,Sh,Lh)*hprime(ph)*(Lh-Sh);
+					const T Mch = Q(ph,Sh,Lh);
+					// Get central values
+					s[d] -= 1;
+					const T& pc = oldGrid(s)[0];
+					const T& cc = oldGrid(s)[1];
+					const T& Sc = oldGrid(s)[2];
+					const T& Lc = oldGrid(s)[3];
+					const T Mpc = Q(pc,Sc,Lc)*hprime(pc)*(Lc-Sc);
+					const T Mcc = Q(pc,Sc,Lc);
+
+					// Put 'em all together
+					divGradP += 0.5*weight*( (Mph+Mpc)*(ph-pc) - (Mpc+Mpl)*(pc-pl) );
+					divGradC += 0.5*weight*( (Mch+Mcc)*(ch-cc) - (Mcc+Mcl)*(cc-cl) );
+					lapPhi   += weight*(ph - 2.*pc + pl);
+					gradPsq  += pow(0.5*(ph - pl)/dx(oldGrid,d), 2.0);
+				}
 			}
 
 			/* ==================================== *
@@ -802,7 +880,8 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 		// copy current values as "old guesses"
 		T Cso = Cs;
 		T Clo = Cl;
-		T weight = 1.0 / ( h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso) ); // determinant of the Jacobian matrix
+		T detJ = ( h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso) ); // determinant of the Jacobian matrix
+		T weight = (detJ>epsilon) ? 1.0/detJ : 0.0;
 		T ds = d2fl_dc2(Clo)*F1(p,c,Cso,Clo) + (1.0-h(p))*F2(Cso,Clo);
 		T dl = d2fs_dc2(Cso)*F1(p,c,Cso,Clo) -      h(p) *F2(Cso,Clo);
 
