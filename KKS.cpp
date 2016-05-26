@@ -5,6 +5,10 @@
 #ifndef KKS_UPDATE
 #define KKS_UPDATE
 #include<cmath>
+// GNU Scientific Library, for multivariate root finding
+#include<gsl/gsl_vector.h>
+#include<gsl/gsl_multiroots.h>
+
 #include"MMSP.hpp"
 #include"KKS.hpp"
 
@@ -44,8 +48,8 @@ const double cBs = (Cse+Cle)/2.0 /*+ 0.01*/;  // initial solid concentration
 const double cBl = (Cse+Cle)/2.0 /*- 0.001*/;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 125; // number of points along c-axis
-const int LUTnp = 125; // number of points along p-axis
+const int LUTnc = 1024; // number of points along c-axis
+const int LUTnp = 1024; // number of points along p-axis
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
@@ -587,7 +591,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			newGrid(n)[2] = Cs_old;
 			newGrid(n)[3] = Cl_old;
 			newGrid(n)[4] = interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			//newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
+			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
 			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
 			double myc = dV*newGrid(n)[1];
@@ -845,6 +849,16 @@ void export_energy(bool silent)
 	ef.close();
 }
 
+
+/* ================================= *
+ * Invoke GSL to solve for Cs and Cl *
+ * ================================= */
+
+struct rparams {
+	double p;
+	double c;
+};
+
 template <class T>
 double F1(const T& p, const T& c, const T& Cs, const T& Cl){return h(p)*Cs + (1.0-h(p))*Cl - c;}
 
@@ -857,13 +871,101 @@ double F2(const T& Cs, const T& Cl){return dfs_dc(Cs) - dfl_dc(Cl);}
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
+int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
+{
+	double p = ((struct rparams *) params)->p;
+	double c = ((struct rparams *) params)->c;
+
+	const double Cs = gsl_vector_get(x, 0);
+	const double Cl = gsl_vector_get(x, 1);
+
+	const double f1 = F1(p, c, Cs, Cl);
+	const double f2 = F2(Cs, Cl);
+
+	gsl_vector_set(f, 0, f1);
+	gsl_vector_set(f, 1, f2);
+
+	return GSL_SUCCESS;
+}
+
+int commonTangent_df(const gsl_vector* x, void* params, gsl_matrix* J)
+{
+	double p = ((struct rparams *) params)->p;
+	double c = ((struct rparams *) params)->c;
+
+	const double Cs = gsl_vector_get(x, 0);
+	const double Cl = gsl_vector_get(x, 1);
+
+	const double df11 = h(p);
+	const double df12 = 1.0 - h(p);
+	const double df21 =  d2fs_dc2(Cs);
+	const double df22 = -d2fl_dc2(Cl);
+
+	gsl_matrix_set(J, 0, 0, df11);
+	gsl_matrix_set(J, 0, 1, df12);
+	gsl_matrix_set(J, 1, 0, df21);
+	gsl_matrix_set(J, 1, 1, df22);
+
+	return GSL_SUCCESS;
+}
+
+int commonTangent_fdf(const gsl_vector* x, void* params, gsl_vector* f, gsl_matrix* J)
+{
+	commonTangent_f(x, params, f);
+	commonTangent_df(x, params, J);
+
+	return GSL_SUCCESS;
+}
+
 template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T& p, const T& c, T& Cs, T& Cl, bool silent)
 {
+	double residual = 0.0;
 	int rank=0;
 	#ifdef MPI_VERSION
 	rank=MPI::COMM_WORLD.Get_rank();
 	#endif
 
+	// basic info
+	int status;
+	size_t i, iter = 0;
+	const size_t n = 2; // two equations
+
+	// specify algorithm
+	const gsl_multiroot_fdfsolver_type *Z;
+	gsl_multiroot_fdfsolver *s;
+	Z = gsl_multiroot_fdfsolver_gnewton;
+	s = gsl_multiroot_fdfsolver_alloc(Z, n);
+
+	struct rparams par = {p, c};
+	gsl_multiroot_function_fdf f = {&commonTangent_f, &commonTangent_df, &commonTangent_fdf, n, &par};
+	double x_init[2] = {Cs, Cl};
+	gsl_vector* x = gsl_vector_alloc(n);
+
+	gsl_vector_set(x, 0, x_init[0]);
+	gsl_vector_set(x, 1, x_init[1]);
+
+	gsl_multiroot_fdfsolver_set(s, &f, x);
+
+	do {
+		iter++;
+		status = gsl_multiroot_fdfsolver_iterate(s);
+		if (status) // extra points for finishing early!
+			break;
+		status = gsl_multiroot_test_residual(s->f, 1.0e-7);
+	} while (status==GSL_CONTINUE && iter<1000);
+
+	Cs = gsl_vector_get(x, 0);
+	Cl = gsl_vector_get(x, 1);
+
+	for (i = 0; i < n ; i++)
+		residual += fabs(gsl_vector_get(s->f, i));
+
+	gsl_multiroot_fdfsolver_free(s);
+	gsl_vector_free(x);
+
+	return residual;
+
+	/*
 	double res = std::sqrt(pow(F1(p,c,Cs,Cl),2.0) + pow(F2(Cs,Cl),2.0)); // initial residual
 
 	double bestCs = Cs;
@@ -915,6 +1017,7 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 			printf("p=%.4f, c=%.4f, iter=%-8u:\tCs=%.4f, Cl=%.4f, res=%.2e, %7u resets\n",                      p, c, l, Cs, Cl, res, resets);
 	}
 	return res;
+	*/
 }
 
 template<class T> double interpolateConc(const LUTGRID& lut, const T& p, const T& c, T& Cs, T& Cl)

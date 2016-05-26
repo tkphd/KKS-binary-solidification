@@ -13,7 +13,7 @@ pflags = $(flags) -include mpi.h
 
 # the program
 KKS: KKS.cpp
-	$(compiler) $(flags) $< -o $@ -lz -fopenmp
+	$(compiler) $(flags) $< -o $@ -lz -lgsl -lgslcblas -fopenmp
 
 gKKS: KKS.cpp
 	g++ $(flags) $< -o $@ -lz -fopenmp
