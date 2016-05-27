@@ -6,6 +6,7 @@
 #define KKS_UPDATE
 #include<cmath>
 // GNU Scientific Library, for multivariate root finding
+#include<gsl/gsl_blas.h>
 #include<gsl/gsl_vector.h>
 #include<gsl/gsl_multiroots.h>
 #include<gsl/gsl_interp2d.h>
@@ -53,14 +54,14 @@ const double a_int = 2.5; // alpha, prefactor of interface width
 const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFL*pow(meshres,2.0)/eps_sq;
-const double ps0 = 1.0-epsilon, pl0 = 0.0+epsilon; // initial phase fractions
-const double cBs = (Cse+Cle)/2.0/* + 0.01*/;  // initial solid concentration
-const double cBl = (Cse+Cle)/2.0/* - 0.001*/;  // initial liquid concentration
+const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
+const double cBs = (Cse+Cle)/2.0 + 0.01;  // initial solid concentration
+const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 1024;  // number of points along c-axis
-const int LUTnp = 1024;  // number of points along p-axis
-const int LUTmargin = 1; // number of points below zero and above one
+const int LUTnc = 1000;  // number of points along c-axis
+const int LUTnp = 1000;  // number of points along p-axis
+const int LUTmargin = 2; // number of points below zero and above one
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
@@ -148,7 +149,7 @@ void generate(int dim, const char* filename)
 			vector<int> x = position(pureconc,n);
 			pureconc(n)[0] = 1.0 - dc*x[1]; // guess Cs
 			pureconc(n)[1] = 1.0 - dc*x[1]; // guess Cl
-			pureconc(n)[2] = iterateConc(reftol, refloop, randomize, dp*x[0], dc*x[1], pureconc(n)[0], pureconc(n)[1], silent);
+			pureconc(n)[2] = iterateConc(dp*x[0], dc*x[1], pureconc(n)[0], pureconc(n)[1]);
 		}
 
 		output(pureconc,"consistentC.lut");
@@ -180,6 +181,22 @@ void generate(int dim, const char* filename)
 	   3. Cl, fictitious composition of liquid
 	   4. Residual associated with Cs,Cl computation
 	 */
+	vector<double> solidValue(7, 0.0);
+	solidValue[0] = ps0;
+	solidValue[1] = cBs;
+	solidValue[2] = 0.5;
+	solidValue[3] = 0.5;
+	solidValue[4] = iterateConc(solidValue[0], solidValue[1], solidValue[2], solidValue[3]);
+	solidValue[5] = solidValue[6] = 0.0;
+
+	vector<double> liquidValue(7, 0.0);
+	liquidValue[0] = pl0;
+	liquidValue[1] = cBl;
+	liquidValue[2] = 0.5;
+	liquidValue[3] = 0.5;
+	liquidValue[4] = iterateConc(liquidValue[0], liquidValue[1], liquidValue[2], liquidValue[3]);
+	liquidValue[5] = liquidValue[6] = 0.0;
+
 	if (dim==1) {
 		int L=512;
 		GRID1D initGrid(7,0,L);
@@ -199,16 +216,10 @@ void generate(int dim, const char* filename)
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = std::abs(x[0] - (g1(initGrid,0)-g0(initGrid,0))/2);
-			if (r < radius) { // Solid
-				initGrid(n)[0] = ps0;
-				initGrid(n)[1] = cBs;
-			} else {
-				initGrid(n)[0] = pl0;
-				initGrid(n)[1] = cBl;
-			}
-			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
-			initGrid(n)[5] = initGrid(n)[6] = 0.;
-			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
+			if (r < radius)
+				initGrid(n).copy(solidValue);
+			else
+				initGrid(n).copy(liquidValue);
 			ctot += initGrid(n)[1]*dx(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid);
 		}
@@ -265,42 +276,21 @@ void generate(int dim, const char* filename)
 			vector<int> x = position(initGrid,n);
 			if (planarTest) {
 				// Planar interface
-				if (x[0] < L/2) {
-					// Solid
-					initGrid(n)[0] = ps0;
-					initGrid(n)[1] = cBs;
-				} else {
-					// Liquid
-					initGrid(n)[0] = pl0;
-					initGrid(n)[1] = cBl;
-				}
+				if (x[0] < L/2)
+					initGrid(n).copy(solidValue);
+				else
+					initGrid(n).copy(liquidValue);
 			} else {
 				double ra = 15.0, rb = 8.0, rc = 8.0;
 				// Circular interfaces
 				if ( (pow(x[0] - (ra+1   ),2) + pow(x[1] - (L/2-ra-1  ),2) < ra*ra) ||
 				     (pow(x[0] - 0.625*(L),2) + pow(x[1] - (L/2-rb-1  ),2) < rb*rb) ||
 				     (pow(x[0] - (L-rc-1 ),2) + pow(x[1] - (rc+1),2) < rc*rc)
-				) {
-					// Solid
-					initGrid(n)[0] = ps0;
-					initGrid(n)[1] = cBs;
-				} else {
-					// Liquid
-					initGrid(n)[0] = pl0;
-					initGrid(n)[1] = cBl;
-				}
+				)
+					initGrid(n).copy(solidValue);
+				else
+					initGrid(n).copy(liquidValue);
 			}
-			/*
-			if (initGrid(n)[0] < -LUTmargin*dp+epsilon ||
-			    initGrid(n)[0] > (LUTnp+LUTmargin)*dp-epsilon ||
-			    initGrid(n)[1] < -LUTmargin*dc+epsilon ||
-			    initGrid(n)[1] > (LUTnc+LUTmargin)*dc-epsilon
-			)
-			*/
-			std::cout<<"point ("<<x[0]<<",\t"<<x[1]<<") has phi="<<initGrid(n)[0]<<",\t c="<<initGrid(n)[1]<<std::endl;
-			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
-			initGrid(n)[5] = initGrid(n)[6] = 0.;
-			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid);
 		}
@@ -356,16 +346,10 @@ void generate(int dim, const char* filename)
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
 			double r = sqrt(pow(radius-x[0]%64,2)+pow(radius-x[1]%64,2));
-			if (r<radius) { // Solid
-				initGrid(n)[0] = ps0;
-				initGrid(n)[1] = cBs;
-			} else {
-				initGrid(n)[0] = pl0;
-				initGrid(n)[1] = cBl;
-			}
-			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
-			initGrid(n)[5] = initGrid(n)[6] = 0.;
-			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
+			if (r<radius)
+				initGrid(n).copy(solidValue);
+			else
+				initGrid(n).copy(liquidValue);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid)*dz(initGrid);
 		}
@@ -410,8 +394,19 @@ void generate(int dim, const char* filename)
 		exit(-1);
 	}
 
-	if (rank==0)
-		printf("Equilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(), Cl_e());
+	if (rank==0) {
+		std::cout<<"Sanity check of interpolation function"<<std::endl;
+		double values[4] = {0., 0.33, 0.67, 1.};
+		std::cout<<"phi\tc\tcs\tcl\tres"<<std::endl;
+		for (int j=0; j<4; j++)
+			for (int i=0; i<4; i++) {
+				double cs, cl, res;
+				res = interpolateConc(LUTinterp, values[i], values[j], cs, cl);
+				std::cout<<values[i]<<'\t'<<values[j]<<'\t'<<cs<<'\t'<<cl<<'\t'<<res<<std::endl;
+			}
+
+		printf("\nEquilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(), Cl_e());
+	}
 
 }
 
@@ -489,7 +484,10 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				// with guessed handling of variable coefficients
 				double weight = 1.0/pow(dx(oldGrid,d), 2.0);
 
-				if (x[d]==x0(oldGrid,d) && x0(oldGrid,d)==g0(oldGrid,d) && useNeumann) {
+				if (x[d] == x0(oldGrid,d) &&
+				    x0(oldGrid,d) == g0(oldGrid,d) &&
+				    useNeumann)
+				{
 					// Based on the "Right-sided second order difference"
 					// Get central values
 					const T& p0 = oldGrid(s)[0];
@@ -524,7 +522,10 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 					divGradP += 0.25*weight*( 3.0*(Mp1+Mp0)*(p1-p0) - (Mp2+Mp1)*(p2-p1) );
 					divGradC += 0.25*weight*( 3.0*(Mc1+Mc0)*(c1-c0) - (Mc2+Mc1)*(c2-c1) );
 					lapPhi   += weight*(2.0*p0 - 5.0*p1 + 4.0*p2 - p3);
-				} else if (x[d]==x1(oldGrid,d)-1 && x1(oldGrid,d)==g1(oldGrid,d) && useNeumann) {
+				} else if (x[d]==x1(oldGrid,d)-1 &&
+				           x1(oldGrid,d)==g1(oldGrid,d) &&
+				           useNeumann)
+				{
 					// Based on the "Left-sided second order difference"
 					// Get central values
 					const T& p3 = oldGrid(s)[0];
@@ -609,6 +610,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 			// Kim, Kim, & Suzuki: Eqn. 33
 			newGrid(n)[1] = c_old + dt*(divGradC + divGradP);
+
 			// For debugging purposes, let's examine these beasts:
 			newGrid(n)[5] = divGradC;
 			newGrid(n)[6] = divGradP;
@@ -623,7 +625,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			newGrid(n)[2] = Cs_old;
 			newGrid(n)[3] = Cl_old;
 			newGrid(n)[4] = interpolateConc(LUTinterp, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
+			//newGrid(n)[4] = iterateConc(newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
 
 			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
 			double myc = dV*newGrid(n)[1];
@@ -826,7 +828,6 @@ double Cs_e() {return Cse;}
 
 double f(const double p, const double c, const double Cs, const double Cl)
 {
-	//const double w = 1.0; // well barrier height
 	return omega*g(p) + h(p)*fs(Cs) + (1.0-h(p))*fl(Cl);
 }
 
@@ -873,7 +874,7 @@ void export_energy(bool silent)
 		for (int j=0; j<nc+1; j++) {
 			double c = cmin+(cmax-cmin)*dc*j;
 			double cs(0.0), cl(1.0);
-			double res=iterateConc(1.0e-6,5e6,randomize,p,c,cs,cl,silent);
+			double res=iterateConc(p,c,cs,cl);
 			ef << ',' << f(p, c, cs, cl);
 		}
 		ef << '\n';
@@ -886,16 +887,19 @@ void export_energy(bool silent)
  * Invoke GSL to solve for Cs and Cl *
  * ================================= */
 
+void print_state (size_t iter, gsl_multiroot_fdfsolver * s){
+    printf ("iter: %3zu x = % 15.8f % 15.8f "
+            "|f(x)| = %g\n",
+            iter,
+            gsl_vector_get (s->x, 0),
+            gsl_vector_get (s->x, 1),
+            gsl_blas_dnrm2 (s->f));
+}
+
 struct rparams {
 	double p;
 	double c;
 };
-
-template <class T>
-double F1(const T& p, const T& c, const T& Cs, const T& Cl){return h(p)*Cs + (1.0-h(p))*Cl - c;}
-
-template <class T>
-double F2(const T& Cs, const T& Cl){return dfs_dc(Cs) - dfl_dc(Cl);}
 
 /* Given const phase fraction (p) and concentration (c), iteratively determine
  * the solid (Cs) and liquid (Cl) fictitious concentrations that satisfy the
@@ -911,8 +915,8 @@ int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
 	const double Cs = gsl_vector_get(x, 0);
 	const double Cl = gsl_vector_get(x, 1);
 
-	const double f1 = F1(p, c, Cs, Cl);
-	const double f2 = F2(Cs, Cl);
+	const double f1 = h(p)*Cs + (1.0-h(p))*Cl - c;
+	const double f2 = dfs_dc(Cs) - dfl_dc(Cl);
 
 	gsl_vector_set(f, 0, f1);
 	gsl_vector_set(f, 1, f2);
@@ -928,8 +932,9 @@ int commonTangent_df(const gsl_vector* x, void* params, gsl_matrix* J)
 	const double Cs = gsl_vector_get(x, 0);
 	const double Cl = gsl_vector_get(x, 1);
 
+	// Jacobian matrix
 	const double df11 = h(p);
-	const double df12 = 1.0 - h(p);
+	const double df12 = 1.0-h(p);
 	const double df21 =  d2fs_dc2(Cs);
 	const double df22 = -d2fl_dc2(Cl);
 
@@ -949,9 +954,8 @@ int commonTangent_fdf(const gsl_vector* x, void* params, gsl_vector* f, gsl_matr
 	return GSL_SUCCESS;
 }
 
-template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T& p, const T& c, T& Cs, T& Cl, bool silent)
+template<class T> double iterateConc(const T& p, const T& c, T& Cs, T& Cl)
 {
-	double residual = 0.0;
 	int rank=0;
 	#ifdef MPI_VERSION
 	rank=MPI::COMM_WORLD.Get_rank();
@@ -959,22 +963,27 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 
 	// basic info
 	int status;
-	int i, iter = 0;
-	const int n = 2; // two equations
+	size_t i, iter = 0;
+	const size_t n = 2; // two equations
 
 	// specify algorithm
 	const gsl_multiroot_fdfsolver_type *algorithm;
 	gsl_multiroot_fdfsolver *s;
-	algorithm = gsl_multiroot_fdfsolver_gnewton;
+	algorithm = gsl_multiroot_fdfsolver_gnewton; // gnewton, hybridj, hybridsj, newton
 	s = gsl_multiroot_fdfsolver_alloc(algorithm, n);
 
-	struct rparams par = {p, c};
+	double initials[4] = {0.};
+	initials[0] = p;
+	initials[1] = c;
+	initials[2] = Cs;
+	initials[3] = Cl;
+
+	struct rparams par = {initials[0], initials[1]};
 	gsl_multiroot_function_fdf mrf = {&commonTangent_f, &commonTangent_df, &commonTangent_fdf, n, &par};
-	double x_init[2] = {Cs, Cl};
 	gsl_vector* x = gsl_vector_alloc(n);
 
-	gsl_vector_set(x, 0, x_init[0]);
-	gsl_vector_set(x, 1, x_init[1]);
+	gsl_vector_set(x, 0, initials[2]);
+	gsl_vector_set(x, 1, initials[3]);
 
 	gsl_multiroot_fdfsolver_set(s, &mrf, x);
 
@@ -983,12 +992,14 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 		status = gsl_multiroot_fdfsolver_iterate(s);
 		if (status) // extra points for finishing early!
 			break;
-		status = gsl_multiroot_test_residual(s->f, 1.0e-7);
+		status = gsl_multiroot_test_residual(s->f, 1.0e-12);
+		//print_state(iter,s);
 	} while (status==GSL_CONTINUE && iter<1000);
 
 	Cs = gsl_vector_get(x, 0);
 	Cl = gsl_vector_get(x, 1);
 
+	double residual = 0.0;
 	for (i = 0; i < n ; i++)
 		residual += fabs(gsl_vector_get(s->f, i));
 

@@ -27,7 +27,7 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T& p, const T& c, T& Cs, T& Cl, bool silent);
+template<class T> double iterateConc(const T& p, const T& c, T& Cs, T& Cl);
 
 
 
@@ -44,8 +44,8 @@ public:
 		// System size
     	const int x0 = MMSP::g0(lut, 0);
     	const int y0 = MMSP::g0(lut, 1);
-	    nx = MMSP::g1(lut,0) - MMSP::g0(lut, 0);
-    	ny = MMSP::g1(lut,1) - MMSP::g0(lut, 1);
+	    nx = MMSP::g1(lut,0) - x0;
+    	ny = MMSP::g1(lut,1) - y0;
     	const double dx = MMSP::dx(lut,0);
     	const double dy = MMSP::dx(lut,1);
 
@@ -57,17 +57,24 @@ public:
     	Ra = new double[nx*ny];
 
 		for (int i=0; i<nx; i++)
-			xa[i] = dx*(1.0*i-x0);
+			xa[i] = dx*(i+x0);
 		for (int j=0; j<ny; j++)
-			ya[j] = dy*(1.0*j-y0);
+			ya[j] = dy*(j+y0);
 
 	    // GSL interpolation function
-    	algorithm = gsl_interp2d_bilinear; // consider gsl_interp2d_bicubic
+    	algorithm = gsl_interp2d_bicubic; // options: gsl_interp2d_bilinear or gsl_interp2d_bicubic
+
 	    CSspline = gsl_spline2d_alloc(algorithm, nx, ny);
     	CLspline = gsl_spline2d_alloc(algorithm, nx, ny);
 	    Rspline = gsl_spline2d_alloc(algorithm, nx, ny);
-    	xacc = gsl_interp_accel_alloc();
-	    yacc = gsl_interp_accel_alloc();
+
+    	xacc1 = gsl_interp_accel_alloc();
+    	xacc2 = gsl_interp_accel_alloc();
+    	xacc3 = gsl_interp_accel_alloc();
+
+	    yacc1 = gsl_interp_accel_alloc();
+	    yacc2 = gsl_interp_accel_alloc();
+	    yacc3 = gsl_interp_accel_alloc();
 
     	// Initialize interpolator
 	    for (int n=0; n<MMSP::nodes(lut); n++) {
@@ -86,8 +93,14 @@ public:
 		gsl_spline2d_free(CSspline);
 	    gsl_spline2d_free(CLspline);
     	gsl_spline2d_free(Rspline);
-	    gsl_interp_accel_free(xacc);
-    	gsl_interp_accel_free(yacc);
+
+	    gsl_interp_accel_free(xacc1);
+	    gsl_interp_accel_free(xacc2);
+	    gsl_interp_accel_free(xacc3);
+
+    	gsl_interp_accel_free(yacc1);
+    	gsl_interp_accel_free(yacc2);
+    	gsl_interp_accel_free(yacc3);
 
 	    delete [] xa; xa=NULL;
     	delete [] ya; ya=NULL;
@@ -98,9 +111,9 @@ public:
 
 	// accessor
 	double interpolate(const T& p, const T& c, T& Cs, T& Cl) {
-		  Cs = static_cast<T>(gsl_spline2d_eval(CSspline, p, c, xacc, yacc));
-		  Cl = static_cast<T>(gsl_spline2d_eval(CLspline, p, c, xacc, yacc));
-		return static_cast<T>(gsl_spline2d_eval(Rspline,  p, c, xacc, yacc));
+		  Cs = static_cast<T>(gsl_spline2d_eval(CSspline, p, c, xacc1, yacc1));
+		  Cl = static_cast<T>(gsl_spline2d_eval(CLspline, p, c, xacc2, yacc2));
+		return static_cast<T>(gsl_spline2d_eval(Rspline,  p, c, xacc3, yacc3));
 	}
 
 private:
@@ -109,8 +122,14 @@ private:
     double* xa;
     double* ya;
 
-    gsl_interp_accel* xacc;
-    gsl_interp_accel* yacc;
+    gsl_interp_accel* xacc1;
+    gsl_interp_accel* xacc2;
+    gsl_interp_accel* xacc3;
+
+    gsl_interp_accel* yacc1;
+    gsl_interp_accel* yacc2;
+    gsl_interp_accel* yacc3;
+
     const gsl_interp2d_type* algorithm;
 
     double* CSa;
