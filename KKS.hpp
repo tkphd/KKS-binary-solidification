@@ -30,7 +30,92 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
  * can be used directly. Otherwise, they serve as a good "best guess" for
  * iterative calculation, which should converge quickly.
  */
-template<class T> double interpolateConc(const LUTGRID& lut, const T& p, const T& c, T& Cs, T& Cl);
+template<typename T> class interpolator
+{
+public:
+	// constructor
+    interpolator(const LUTGRID& lut){
+		// System size
+	    nx = MMSP::g1(lut,0) - MMSP::g0(lut, 0);
+    	ny = MMSP::g1(lut,1) - MMSP::g0(lut, 1);
+    	const double dx = MMSP::dx(lut,0);
+    	const double dy = MMSP::dx(lut,1);
+
+	    // Data arrays
+    	xa = new double[nx];
+	    ya = new double[ny];
+    	CSa = new double[nx*ny];
+	    CLa = new double[nx*ny];
+    	Ra = new double[nx*ny];
+
+		for (int i=0; i<nx; i++)
+			xa[i] = dx*(i-1);
+		for (int i=0; i<ny; i++)
+			ya[i] = dy*(i-1);
+
+	    // GSL interpolation function
+    	algorithm = gsl_interp2d_bilinear; // consider gsl_interp2d_bicubic
+	    CSspline = gsl_spline2d_alloc(algorithm, nx, ny);
+    	CLspline = gsl_spline2d_alloc(algorithm, nx, ny);
+	    Rspline = gsl_spline2d_alloc(algorithm, nx, ny);
+    	xacc = gsl_interp_accel_alloc();
+	    yacc = gsl_interp_accel_alloc();
+
+    	// Initialize interpolator
+	    for (int n=0; n<MMSP::nodes(lut); n++) {
+    	    MMSP::vector<int> x = MMSP::position(lut, n);
+        	gsl_spline2d_set(CSspline, CSa, x[0]+1, x[1]+1, lut(n)[0]);
+	        gsl_spline2d_set(CLspline, CLa, x[0]+1, x[1]+1, lut(n)[1]);
+    	    gsl_spline2d_set(Rspline,  Ra,  x[0]+1, x[1]+1, lut(n)[2]);
+    	}
+	    gsl_spline2d_init(CSspline, xa, ya, CSa, nx, ny);
+    	gsl_spline2d_init(CLspline, xa, ya, CLa, nx, ny);
+	    gsl_spline2d_init(Rspline, xa, ya, Ra, nx, ny);
+    }
+
+    ~interpolator(){
+		gsl_spline2d_free(CSspline);
+	    gsl_spline2d_free(CLspline);
+    	gsl_spline2d_free(Rspline);
+	    gsl_interp_accel_free(xacc);
+    	gsl_interp_accel_free(yacc);
+
+	    delete [] xa; xa=NULL;
+    	delete [] ya; ya=NULL;
+	    delete [] CSa; CSa=NULL;
+    	delete [] CLa; CLa=NULL;
+	    delete [] Ra; Ra=NULL;
+	}
+
+	// accessor
+	double interpolate(const T& p, const T& c, T& Cs, T& Cl) {
+		  Cs = static_cast<T>(gsl_spline2d_eval(CSspline, p, c, xacc, yacc));
+		  Cl = static_cast<T>(gsl_spline2d_eval(CLspline, p, c, xacc, yacc));
+		return static_cast<T>(gsl_spline2d_eval(Rspline,  p, c, xacc, yacc));
+	}
+
+private:
+    size_t nx;
+    size_t ny;
+    double* xa;
+    double* ya;
+
+    gsl_interp_accel* xacc;
+    gsl_interp_accel* yacc;
+    const gsl_interp2d_type* algorithm;
+
+    double* CSa;
+    double* CLa;
+    double* Ra;
+
+    gsl_spline2d* CSspline;
+    gsl_spline2d* CLspline;
+    gsl_spline2d* Rspline;
+
+};
+
+
+template<class T> double interpolateConc(interpolator<T>& LUTinterp, const T& p, const T& c, T& Cs, T& Cl);
 
 double h(const double p)     {return pow(p,3.0) * (6.0*p*p - 15.0*p + 10.0);}
 double hprime(const double p){return 30.0 * pow(p,2.0)*pow(1.0-p,2.0); }

@@ -8,6 +8,8 @@
 // GNU Scientific Library, for multivariate root finding
 #include<gsl/gsl_vector.h>
 #include<gsl/gsl_multiroots.h>
+#include<gsl/gsl_interp2d.h>
+#include<gsl/gsl_spline2d.h>
 
 #include"MMSP.hpp"
 #include"KKS.hpp"
@@ -34,6 +36,8 @@ const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
 #endif
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
+const bool useNeumann = true;
+const bool planarTest = true;
 const double CFL = 1.0/300.0; // controls timestep
 
 // Kinetic and model parameters
@@ -44,8 +48,8 @@ const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFL*pow(meshres,2.0)/eps_sq;
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = (Cse+Cle)/2.0 /*+ 0.01*/;  // initial solid concentration
-const double cBl = (Cse+Cle)/2.0 /*- 0.001*/;  // initial liquid concentration
+const double cBs = (Cse+Cle)/2.0 + 0.01;  // initial solid concentration
+const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
 const int LUTnc = 1024; // number of points along c-axis
@@ -154,6 +158,9 @@ void generate(int dim, const char* filename)
 	pureconc.input("consistentC.lut",ghost,serial);
 	#endif
 
+	// Construct the interpolator
+	interpolator<double> LUTinterp(pureconc);
+
 	/* ====================================================================== *
 	 * Generate initial conditions using phase diagram and freshly minted LUT *
 	 * ====================================================================== */
@@ -170,9 +177,9 @@ void generate(int dim, const char* filename)
 		GRID1D initGrid(5,0,L);
 		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
-			if (x0(initGrid,d)==g0(initGrid,d))
+			if (useNeumann && x0(initGrid,d)==g0(initGrid,d))
 				b0(initGrid,d) = Neumann;
-			else if (x1(initGrid,d)==g1(initGrid,d))
+			else if (useNeumann && x1(initGrid,d)==g1(initGrid,d))
 				b1(initGrid,d) = Neumann;
 		}
 
@@ -191,7 +198,7 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
-			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid);
@@ -238,43 +245,43 @@ void generate(int dim, const char* filename)
 		GRID2D initGrid(5,0,L,0,L/2);
 		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
-			if (x0(initGrid,d)==g0(initGrid,d))
+			if (useNeumann && x0(initGrid,d)==g0(initGrid,d))
 				b0(initGrid,d) = Neumann;
-			else if (x1(initGrid,d)==g1(initGrid,d))
+			else if (useNeumann && x1(initGrid,d)==g1(initGrid,d))
 				b1(initGrid,d) = Neumann;
 		}
 
 		double ctot = 0.0, ftot = 0.0;
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> x = position(initGrid,n);
-			/**/
-			double ra = 15.0, rb = 8.0, rc = 8.0;
-			// Circular interfaces
-			if ( (pow(x[0] - (ra+1   ),2) + pow(x[1] - (L/2-ra-1  ),2) < ra*ra) ||
-			     (pow(x[0] - 0.625*(L),2) + pow(x[1] - (L/2-rb-1  ),2) < rb*rb) ||
-			     (pow(x[0] - (L-rc-1 ),2) + pow(x[1] - (rc+1),2) < rc*rc)
-			) {
-				// Solid
-				initGrid(n)[0] = ps0;
-				initGrid(n)[1] = cBs;
+			if (planarTest) {
+				// Planar interface
+				if (x[0] < L/2) {
+					// Solid
+					initGrid(n)[0] = ps0;
+					initGrid(n)[1] = cBs;
+				} else {
+					// Liquid
+					initGrid(n)[0] = pl0;
+					initGrid(n)[1] = cBl;
+				}
 			} else {
-				// Liquid
-				initGrid(n)[0] = pl0;
-				initGrid(n)[1] = cBl;
+				double ra = 15.0, rb = 8.0, rc = 8.0;
+				// Circular interfaces
+				if ( (pow(x[0] - (ra+1   ),2) + pow(x[1] - (L/2-ra-1  ),2) < ra*ra) ||
+				     (pow(x[0] - 0.625*(L),2) + pow(x[1] - (L/2-rb-1  ),2) < rb*rb) ||
+				     (pow(x[0] - (L-rc-1 ),2) + pow(x[1] - (rc+1),2) < rc*rc)
+				) {
+					// Solid
+					initGrid(n)[0] = ps0;
+					initGrid(n)[1] = cBs;
+				} else {
+					// Liquid
+					initGrid(n)[0] = pl0;
+					initGrid(n)[1] = cBl;
+				}
 			}
-			/*
-			// Planar interface
-			if (x[0] < L/2) {
-				// Solid
-				initGrid(n)[0] = ps0;
-				initGrid(n)[1] = cBs;
-			} else {
-				// Liquid
-				initGrid(n)[0] = pl0;
-				initGrid(n)[1] = cBl;
-			}
-			*/
-			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid);
@@ -321,9 +328,9 @@ void generate(int dim, const char* filename)
 		GRID3D initGrid(5,0,L,0,L,0,L);
 		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
-			if (x0(initGrid,d)==g0(initGrid,d))
+			if (useNeumann && x0(initGrid,d)==g0(initGrid,d))
 				b0(initGrid,d) = Neumann;
-			else if (x1(initGrid,d)==g1(initGrid,d))
+			else if (useNeumann && x1(initGrid,d)==g1(initGrid,d))
 				b1(initGrid,d) = Neumann;
 		}
 
@@ -338,7 +345,7 @@ void generate(int dim, const char* filename)
 				initGrid(n)[0] = pl0;
 				initGrid(n)[1] = cBl;
 			}
-			initGrid(n)[4] = interpolateConc(pureconc, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
 			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid)*dz(initGrid);
@@ -407,6 +414,9 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 	pureconc.input("consistentC.lut",ghost,serial);
 	#endif
 
+	// Construct the interpolator
+	interpolator<T> LUTinterp(pureconc);
+
 	ghostswap(oldGrid);
    	grid<dim,vector<T> > newGrid(oldGrid);
 	double dV=1.0;
@@ -414,10 +424,10 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 		dx(oldGrid,d) = meshres;
 		dx(newGrid,d) = meshres;
 		dV *= dx(oldGrid,d);
-		if (x0(oldGrid,d) == g0(oldGrid,d)) {
+		if (useNeumann && x0(oldGrid,d) == g0(oldGrid,d)) {
 			b0(oldGrid,d) = Neumann;
 			b0(newGrid,d) = Neumann;
-		} else if (x1(oldGrid,d) == g1(oldGrid,d)) {
+		} else if (useNeumann && x1(oldGrid,d) == g1(oldGrid,d)) {
 			b1(oldGrid,d) = Neumann;
 			b1(newGrid,d) = Neumann;
 		}
@@ -460,7 +470,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				// with guessed handling of variable coefficients
 				double weight = 1.0/pow(dx(oldGrid,d), 2.0);
 
-				if (x[d]==x0(oldGrid,d) && b0(oldGrid,d) == Neumann) {
+				if (x[d]==x0(oldGrid,d) && x0(oldGrid,d)==g0(oldGrid,d) && useNeumann) {
 					// Based on the "Right-sided second order difference"
 					// Get central values
 					const T& p0 = oldGrid(s)[0];
@@ -495,7 +505,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 					divGradP += 0.25*weight*( 3.0*(Mp1+Mp0)*(p1-p0) - (Mp2+Mp1)*(p2-p1) );
 					divGradC += 0.25*weight*( 3.0*(Mc1+Mc0)*(c1-c0) - (Mc2+Mc1)*(c2-c1) );
 					lapPhi   += weight*(2.0*p0 - 5.0*p1 + 4.0*p2 - p3);
-				} else if (x[d]==x1(oldGrid,d)-1 && b1(oldGrid,d)==Neumann) {
+				} else if (x[d]==x1(oldGrid,d)-1 && x1(oldGrid,d)==g1(oldGrid,d) && useNeumann) {
 					// Based on the "Left-sided second order difference"
 					// Get central values
 					const T& p3 = oldGrid(s)[0];
@@ -590,8 +600,8 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			bool silent=true, randomize=false;
 			newGrid(n)[2] = Cs_old;
 			newGrid(n)[3] = Cl_old;
-			newGrid(n)[4] = interpolateConc(pureconc, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
+			newGrid(n)[4] = interpolateConc(LUTinterp, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
+			//newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
 			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
 			double myc = dV*newGrid(n)[1];
@@ -873,8 +883,8 @@ double F2(const T& Cs, const T& Cl){return dfs_dc(Cs) - dfl_dc(Cl);}
  */
 int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
 {
-	double p = ((struct rparams *) params)->p;
-	double c = ((struct rparams *) params)->c;
+	const double p = ((struct rparams *) params)->p;
+	const double c = ((struct rparams *) params)->c;
 
 	const double Cs = gsl_vector_get(x, 0);
 	const double Cl = gsl_vector_get(x, 1);
@@ -890,8 +900,8 @@ int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
 
 int commonTangent_df(const gsl_vector* x, void* params, gsl_matrix* J)
 {
-	double p = ((struct rparams *) params)->p;
-	double c = ((struct rparams *) params)->c;
+	const double p = ((struct rparams *) params)->p;
+	const double c = ((struct rparams *) params)->c;
 
 	const double Cs = gsl_vector_get(x, 0);
 	const double Cl = gsl_vector_get(x, 1);
@@ -931,20 +941,20 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	const size_t n = 2; // two equations
 
 	// specify algorithm
-	const gsl_multiroot_fdfsolver_type *Z;
+	const gsl_multiroot_fdfsolver_type *algorithm;
 	gsl_multiroot_fdfsolver *s;
-	Z = gsl_multiroot_fdfsolver_gnewton;
-	s = gsl_multiroot_fdfsolver_alloc(Z, n);
+	algorithm = gsl_multiroot_fdfsolver_gnewton;
+	s = gsl_multiroot_fdfsolver_alloc(algorithm, n);
 
 	struct rparams par = {p, c};
-	gsl_multiroot_function_fdf f = {&commonTangent_f, &commonTangent_df, &commonTangent_fdf, n, &par};
+	gsl_multiroot_function_fdf mrf = {&commonTangent_f, &commonTangent_df, &commonTangent_fdf, n, &par};
 	double x_init[2] = {Cs, Cl};
 	gsl_vector* x = gsl_vector_alloc(n);
 
 	gsl_vector_set(x, 0, x_init[0]);
 	gsl_vector_set(x, 1, x_init[1]);
 
-	gsl_multiroot_fdfsolver_set(s, &f, x);
+	gsl_multiroot_fdfsolver_set(s, &mrf, x);
 
 	do {
 		iter++;
@@ -964,133 +974,15 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 	gsl_vector_free(x);
 
 	return residual;
-
-	/*
-	double res = std::sqrt(pow(F1(p,c,Cs,Cl),2.0) + pow(F2(Cs,Cl),2.0)); // initial residual
-
-	double bestCs = Cs;
-	double bestCl = Cl;
-	double bestRes = res;
-
-	const double cmin(-5.0), cmax(6.0); // min, max values for Cs, Cl before triggering random re-initialization
-
-	// Iterate until either the matrix is solved (residual<tolerance)
-	// or patience wears out (loop>maxloops, likely due to infinite loop).
-	unsigned int l=0;
-	unsigned int resets=0;
-	while (l<maxloops && res>tol) {
-		// copy current values as "old guesses"
-		T Cso = Cs;
-		T Clo = Cl;
-		T detJ = ( h(p)*d2fl_dc2(Clo) + (1.0-h(p))*d2fs_dc2(Cso) ); // determinant of the Jacobian matrix
-		T weight = (detJ>epsilon) ? 1.0/detJ : 0.0;
-		T ds = d2fl_dc2(Clo)*F1(p,c,Cso,Clo) + (1.0-h(p))*F2(Cso,Clo);
-		T dl = d2fs_dc2(Cso)*F1(p,c,Cso,Clo) -      h(p) *F2(Cso,Clo);
-
-		Cs = Cso + weight * ds;
-		Cl = Clo + weight * dl;
-		if (randomize && (Cs<cmin || Cs>cmax || Cl<cmin || Cl>cmax)) {
-			// If Newton falls out of bounds, shake everything up.
-			// Helps the numerics, but won't fix fundamental problems.
-			Cs = double(rand())/RAND_MAX;
-			Cl = double(rand())/RAND_MAX;
-			resets++;
-		}
-
-		res = std::sqrt(pow(F1(p,c,Cs,Cl),2.0) + pow(F2(Cs,Cl),2.0));
-
-		if (res < bestRes) {
-			bestCs = Cs;
-			bestCl = Cl;
-			bestRes = res;
-		}
-
-		l++;
-	}
-	Cs = bestCs;
-	Cl = bestCl;
-	res = bestRes;
-	if (!silent && rank==0) {
-		if (l>=maxloops)
-			printf("p=%.4f, c=%.4f, iter=%-8u:\tCs=%.4f, Cl=%.4f, res=%.2e, %7u resets (failed to converge)\n", p, c, l, Cs, Cl, res, resets);
-		else
-			printf("p=%.4f, c=%.4f, iter=%-8u:\tCs=%.4f, Cl=%.4f, res=%.2e, %7u resets\n",                      p, c, l, Cs, Cl, res, resets);
-	}
-	return res;
-	*/
 }
 
-template<class T> double interpolateConc(const LUTGRID& lut, const T& p, const T& c, T& Cs, T& Cl)
+/* ================================ *
+ * Invoke GSL to interpolate Cs, Cl *
+ * ================================ */
+
+template<class T> double interpolateConc(interpolator<T>& LUTinterp, const T& p, const T& c, T& Cs, T& Cl)
 {
-	// Determine indices in (p,c) space for LUT access
-	int idp_lo = int( double(p+dp)*double(LUTnp+2)/(1.0+2.0*dp) );
-	int idc_lo = int( double(c+dc)*double(LUTnc+2)/(1.0+2.0*dc) );
-	if (idp_lo>LUTnp)
-		idp_lo = LUTnp;
-	if (idp_lo<-1)
-		idp_lo = -1;
-	if (idc_lo>LUTnc)
-		idc_lo = LUTnc;
-	if (idc_lo<-1)
-		idc_lo = -1;
-	int idp_hi = idp_lo+1;
-	int idc_hi = idc_lo+1;
-
-	// Bound p,c in LUT neighborhood
-	const double p_lo = dp*(idp_lo-1);
-	const double p_hi = dp*(idp_hi-1);
-	const double c_lo = dc*(idc_lo-1);
-	const double c_hi = dc*(idc_hi-1);
-
-	if (1) { // Interpolate Cs
-		// Determine limiting values of Cs at corners
-		const double C00 = lut[idp_lo][idc_lo][0]; // lower left
-		const double C01 = lut[idp_lo][idc_hi][0]; // upper left
-		const double C10 = lut[idp_hi][idc_lo][0]; // lower right
-		const double C11 = lut[idp_hi][idc_hi][0]; // upper right
-
-		// Linear interpolation to estimate Cs: if the LUT mesh is sufficiently dense, no further work is required. (Big If.)
-		if (idp_lo==idp_hi) {
-			// Linear interpolation in c, only
-			Cs = C00 + ((C01-C00)/(c_hi-c_lo))*(c-c_lo);
-		} else if (idc_lo==idc_hi) {
-			// Linear interpolation in phi, only
-			Cs = C00 + ((C10-C00)/(p_hi-p_lo))*(p-p_lo);
-		} else {
-			// Bilinear interpolation to estimate Cs
-			Cs = (  (p_hi-p   )*(c_hi-c   )*C00
-	               +(p   -p_lo)*(c_hi-c   )*C10
-			       +(p_hi-p   )*(c   -c_lo)*C01
-			       +(p   -p_lo)*(c   -c_lo)*C11
-			     )/((p_hi-p_lo)*(c_hi-c_lo));
-		}
-	}
-
-	if (1) { // Interpolate Cl
-		// Determine limiting values of Cl at corners
-		const double C00 = lut[idp_lo][idc_lo][1]; // lower left
-		const double C01 = lut[idp_lo][idc_hi][1]; // upper left
-		const double C10 = lut[idp_hi][idc_lo][1]; // lower right
-		const double C11 = lut[idp_hi][idc_hi][1]; // upper right
-
-		// Linear interpolation to estimate Cl: if the LUT mesh is sufficiently dense, no further work is required. (Big If.)
-		if (idp_lo==idp_hi) {
-			// Linear interpolation in c, only
-			Cl = C00 + ((C01-C00)/(c_hi-c_lo))*(c-c_lo);
-		} else if (idc_lo==idc_hi) {
-			// Linear interpolation in phi, only
-			Cl = C00 + ((C10-C00)/(p_hi-p_lo))*(p-p_lo);
-		} else {
-			// Bilinear interpolation to estimate Cl
-			Cl = (  (p_hi-p   )*(c_hi-c   )*C00
-	               +(p   -p_lo)*(c_hi-c   )*C10
-			       +(p_hi-p   )*(c   -c_lo)*C01
-			       +(p   -p_lo)*(c   -c_lo)*C11
-			     )/((p_hi-p_lo)*(c_hi-c_lo));
-		}
-	}
-	return std::max(std::max(lut[idp_lo][idc_lo][2], lut[idp_lo][idc_hi][2]),
-	                std::max(lut[idp_hi][idc_lo][2], lut[idp_hi][idc_hi][2]));
+	return LUTinterp.interpolate(p, c, Cs, Cl);
 }
 #endif
 
