@@ -30,15 +30,21 @@ double calCl[11] = { 6.18692878e+03,-3.09579439e+04, 6.68516329e+04,-8.15779791e
 const double  Cse = 0.48300,  Cle = 0.33886;    // equilibrium concentration
 #else
 // Parabolic model parameters
-const double  As = 150.0, Al = 150.0;   // 2*curvature of parabola
-const double dCs = 10.0, dCl  = 10.0;   // y-axis offset
-const double  Cse = 0.3,  Cle = 0.7;    // equilibrium concentration
+const double  As = 150.0,  Al = 150.0;   // 2*curvature of parabola
+const double dCs =  10.0, dCl =  10.0;   // y-axis offset
+const double  Cse =  0.3,  Cle =  0.7;   // equilibrium concentration
 #endif
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
-const bool useNeumann = true;
-const bool planarTest = true;
+const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 const double CFL = 1.0/300.0; // controls timestep
+
+
+const bool useNeumann = true;
+
+const bool planarTest = true;
+
+
 
 // Kinetic and model parameters
 const double meshres = 0.075; // dx=dy
@@ -47,13 +53,14 @@ const double a_int = 2.5; // alpha, prefactor of interface width
 const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFL*pow(meshres,2.0)/eps_sq;
-const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = (Cse+Cle)/2.0 + 0.01;  // initial solid concentration
-const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
+const double ps0 = 1.0-epsilon, pl0 = 0.0+epsilon; // initial phase fractions
+const double cBs = (Cse+Cle)/2.0/* + 0.01*/;  // initial solid concentration
+const double cBl = (Cse+Cle)/2.0/* - 0.001*/;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 1024; // number of points along c-axis
-const int LUTnp = 1024; // number of points along p-axis
+const int LUTnc = 1024;  // number of points along c-axis
+const int LUTnp = 1024;  // number of points along p-axis
+const int LUTmargin = 1; // number of points below zero and above one
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
@@ -62,7 +69,6 @@ const unsigned int refloop = 1e7;// ceiling to kill infinite loops in iterative 
 const unsigned int fasloop = 5e6;// ceiling to kill infinite loops in iterative scheme: fast update() threshold
 const double reftol = 1.0e-8;    // tolerance for iterative scheme to satisfy equal chemical potential: reference table threshold
 const double fastol = 1.0e-7;    // tolerance for iterative scheme to satisfy equal chemical potential: fast update() threshold
-const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
 
 namespace MMSP{
 
@@ -128,13 +134,15 @@ void generate(int dim, const char* filename)
 		if (rank==0)
 			std::cout<<"Writing look-up table of Cs, Cl to consistentC.lut. Please be patient..."<<std::endl;
 		bool silent=true, randomize=true;
-		LUTGRID pureconc(3,-1,2+LUTnp,-1,2+LUTnc);
+		LUTGRID pureconc(3, -LUTmargin,LUTnp+LUTmargin+1, -LUTmargin,LUTnc+LUTmargin+1);
 		dx(pureconc,0) = dp; // different resolution in phi
 		dx(pureconc,1) = dc; // and c is not unreasonable
 
+		/*
 		#ifndef MPI_VERSION
 		#pragma omp parallel for
 		#endif
+		*/
 		for (int n=0; n<nodes(pureconc); n++) {
 			simple_progress(n,nodes(pureconc));
 			vector<int> x = position(pureconc,n);
@@ -152,7 +160,7 @@ void generate(int dim, const char* filename)
 	LUTGRID pureconc("consistentC.lut",ghost);
 	#else
 	MPI::COMM_WORLD.Barrier();
-	LUTGRID pureconc(3,-1,2+LUTnp,-1,2+LUTnc);
+	LUTGRID pureconc(3, -LUTmargin,LUTnp+LUTmargin+1, -LUTmargin,LUTnc+LUTmargin+1);
 	const bool serial=true; // Please do not change this :-)
 	const int ghost=1;
 	pureconc.input("consistentC.lut",ghost,serial);
@@ -174,7 +182,7 @@ void generate(int dim, const char* filename)
 	 */
 	if (dim==1) {
 		int L=512;
-		GRID1D initGrid(5,0,L);
+		GRID1D initGrid(7,0,L);
 		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
 			if (useNeumann && x0(initGrid,d)==g0(initGrid,d))
@@ -199,6 +207,7 @@ void generate(int dim, const char* filename)
 				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[5] = initGrid(n)[6] = 0.;
 			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid);
@@ -242,7 +251,7 @@ void generate(int dim, const char* filename)
 
 	} else if (dim==2) {
 		int L = 64;
-		GRID2D initGrid(5,0,L,0,L/2);
+		GRID2D initGrid(7,0,L,0,L/2);
 		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
 			if (useNeumann && x0(initGrid,d)==g0(initGrid,d))
@@ -281,7 +290,16 @@ void generate(int dim, const char* filename)
 					initGrid(n)[1] = cBl;
 				}
 			}
+			/*
+			if (initGrid(n)[0] < -LUTmargin*dp+epsilon ||
+			    initGrid(n)[0] > (LUTnp+LUTmargin)*dp-epsilon ||
+			    initGrid(n)[1] < -LUTmargin*dc+epsilon ||
+			    initGrid(n)[1] > (LUTnc+LUTmargin)*dc-epsilon
+			)
+			*/
+			std::cout<<"point ("<<x[0]<<",\t"<<x[1]<<") has phi="<<initGrid(n)[0]<<",\t c="<<initGrid(n)[1]<<std::endl;
 			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[5] = initGrid(n)[6] = 0.;
 			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid);
@@ -325,7 +343,7 @@ void generate(int dim, const char* filename)
 	} else if (dim==3) {
 		int L=64;
 		double radius=10.0;
-		GRID3D initGrid(5,0,L,0,L,0,L);
+		GRID3D initGrid(7,0,L,0,L,0,L);
 		for (int d=0; d<dim; d++) {
 			dx(initGrid,d) = meshres;
 			if (useNeumann && x0(initGrid,d)==g0(initGrid,d))
@@ -346,6 +364,7 @@ void generate(int dim, const char* filename)
 				initGrid(n)[1] = cBl;
 			}
 			initGrid(n)[4] = interpolateConc(LUTinterp, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3]);
+			initGrid(n)[5] = initGrid(n)[6] = 0.;
 			//initGrid(n)[4] = iterateConc(reftol, refloop, 0, initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3], 1);
 			ctot += initGrid(n)[1]*dx(initGrid)*dy(initGrid)*dz(initGrid);
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid)*dz(initGrid);
@@ -408,7 +427,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 	const int ghost=0;
 	LUTGRID pureconc("consistentC.lut",ghost);
 	#else
-	LUTGRID pureconc(3,0,1+LUTnp,0,1+LUTnc);
+	LUTGRID pureconc(3, -LUTmargin,LUTnp+LUTmargin+1, -LUTmargin,LUTnc+LUTmargin+1);
 	const bool serial=true; // Please do not change this :-)
 	const int ghost=1;
 	pureconc.input("consistentC.lut",ghost,serial);
@@ -449,10 +468,10 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			vector<int> x = position(oldGrid,n);
 
 			// Cache some frequently-used reference values
-			const T phi_old = oldGrid(n)[0];
-			const T c_old   = oldGrid(n)[1];
-			const T Cs_old  = oldGrid(n)[2];
-			const T Cl_old  = oldGrid(n)[3];
+			const T& phi_old = oldGrid(n)[0];
+			const T& c_old   = oldGrid(n)[1];
+			const T& Cs_old  = oldGrid(n)[2];
+			const T& Cl_old  = oldGrid(n)[3];
 
 			// Compute divergence of c, phi using half-steps in space for second-order accuracy,
 			// laplacian of phi (alone, since built-in Laplacian returns all fields),
@@ -590,6 +609,9 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 
 			// Kim, Kim, & Suzuki: Eqn. 33
 			newGrid(n)[1] = c_old + dt*(divGradC + divGradP);
+			// For debugging purposes, let's examine these beasts:
+			newGrid(n)[5] = divGradC;
+			newGrid(n)[6] = divGradP;
 
 
 			/* ============================== *
@@ -601,7 +623,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			newGrid(n)[2] = Cs_old;
 			newGrid(n)[3] = Cl_old;
 			newGrid(n)[4] = interpolateConc(LUTinterp, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			//newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
+			newGrid(n)[4] = iterateConc(reftol, refloop, randomize, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3], silent);
 
 			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
 			double myc = dV*newGrid(n)[1];
@@ -937,8 +959,8 @@ template<class T> double iterateConc(const double tol, const unsigned int maxloo
 
 	// basic info
 	int status;
-	size_t i, iter = 0;
-	const size_t n = 2; // two equations
+	int i, iter = 0;
+	const int n = 2; // two equations
 
 	// specify algorithm
 	const gsl_multiroot_fdfsolver_type *algorithm;

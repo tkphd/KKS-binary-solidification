@@ -10,12 +10,16 @@ typedef MMSP::grid<1,MMSP::vector<double> > GRID1D;
 typedef MMSP::grid<2,MMSP::vector<double> > GRID2D;
 typedef MMSP::grid<3,MMSP::vector<double> > GRID3D;
 
+
+
 /* KKS requires a look-up table of Cs and Cl consistent with the constraint
  * of constant chemical potential over the full range of C and phi. This provides
  * initial guesses for iterative reconciliation of Cs and Cl with phi and c at each
  * grid point and timestep.
  */
 typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
+
+
 
 /* Given const phase fraction (p) and concentration (c), iteratively determine
  * the solid (Cs) and liquid (Cl) fictitious concentrations that satisfy the
@@ -24,6 +28,8 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
  * single function to both populate the LUT and interpolate values based thereupon.
  */
 template<class T> double iterateConc(const double tol, const unsigned int maxloops, bool randomize, const T& p, const T& c, T& Cs, T& Cl, bool silent);
+
+
 
 /* Given const LUTGRID, phase fraction (p), and concentration (c), apply
  * linear interpolation to estimate Cs and Cl. For a dense LUT mesh, values
@@ -36,6 +42,8 @@ public:
 	// constructor
     interpolator(const LUTGRID& lut){
 		// System size
+    	const int x0 = MMSP::g0(lut, 0);
+    	const int y0 = MMSP::g0(lut, 1);
 	    nx = MMSP::g1(lut,0) - MMSP::g0(lut, 0);
     	ny = MMSP::g1(lut,1) - MMSP::g0(lut, 1);
     	const double dx = MMSP::dx(lut,0);
@@ -49,9 +57,9 @@ public:
     	Ra = new double[nx*ny];
 
 		for (int i=0; i<nx; i++)
-			xa[i] = dx*(i-1);
-		for (int i=0; i<ny; i++)
-			ya[i] = dy*(i-1);
+			xa[i] = dx*(1.0*i-x0);
+		for (int j=0; j<ny; j++)
+			ya[j] = dy*(1.0*j-y0);
 
 	    // GSL interpolation function
     	algorithm = gsl_interp2d_bilinear; // consider gsl_interp2d_bicubic
@@ -64,15 +72,16 @@ public:
     	// Initialize interpolator
 	    for (int n=0; n<MMSP::nodes(lut); n++) {
     	    MMSP::vector<int> x = MMSP::position(lut, n);
-        	gsl_spline2d_set(CSspline, CSa, x[0]+1, x[1]+1, lut(n)[0]);
-	        gsl_spline2d_set(CLspline, CLa, x[0]+1, x[1]+1, lut(n)[1]);
-    	    gsl_spline2d_set(Rspline,  Ra,  x[0]+1, x[1]+1, lut(n)[2]);
+        	gsl_spline2d_set(CSspline, CSa, x[0]-x0, x[1]-y0, lut(n)[0]);
+	        gsl_spline2d_set(CLspline, CLa, x[0]-x0, x[1]-y0, lut(n)[1]);
+    	    gsl_spline2d_set(Rspline,  Ra,  x[0]-x0, x[1]-y0, lut(n)[2]);
     	}
 	    gsl_spline2d_init(CSspline, xa, ya, CSa, nx, ny);
     	gsl_spline2d_init(CLspline, xa, ya, CLa, nx, ny);
-	    gsl_spline2d_init(Rspline, xa, ya, Ra, nx, ny);
+	    gsl_spline2d_init(Rspline,  xa, ya, Ra,  nx, ny);
     }
 
+	// destructor
     ~interpolator(){
 		gsl_spline2d_free(CSspline);
 	    gsl_spline2d_free(CLspline);
@@ -149,7 +158,7 @@ double Cl_e(); // equilbrium Cl
 
 double Cs_e(); // equilbrium Cs
 
-double k(const double Cs, const double Cl){return Cs/Cl;} // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
+double k(const double Cs, const double Cl){return Cs_e()/Cl_e();} // Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
 
 double Q(const double p, const double Cs, const double Cl){return 0.01 + (1.0-p)/(1.0 + k(Cs, Cl) - (1.0-k(Cs, Cl))*p);}
 
