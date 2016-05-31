@@ -396,35 +396,8 @@ void generate(int dim, const char* filename)
 		exit(-1);
 	}
 
-	if (rank==0) {
-		std::cout<<"Sanity check of interpolation function"<<std::endl;
-		double values[4] = {0., 0.33, 0.67, 1.};
-		std::cout<<"phi\tc\tcs\tcl\tres"<<std::endl;
-		for (int j=0; j<4; j++)
-			for (int i=0; i<4; i++) {
-				double cs, cl, res;
-				res = interpolateConc(LUTinterp, values[i], values[j], cs, cl);
-				std::cout<<values[i]<<'\t'<<values[j]<<'\t'<<cs<<'\t'<<cl<<'\t'<<res<<std::endl;
-			}
-
+	if (rank==0)
 		printf("\nEquilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(), Cl_e());
-	}
-
-	if (rank==0) {
-		std::cout<<"Sanity check of iiterative solver"<<std::endl;
-		double values[4] = {0., 0.33, 0.67, 1.};
-		std::cout<<"phi\tc\tcs\tcl\tres"<<std::endl;
-		for (int j=0; j<4; j++)
-			for (int i=0; i<4; i++) {
-				double cs = 0.5;
-				double cl = 0.5;
-				double res = 1.;
-				res = iterateConc(values[i], values[j], cs, cl);
-				std::cout<<values[i]<<'\t'<<values[j]<<'\t'<<cs<<'\t'<<cl<<'\t'<<res<<std::endl;
-			}
-
-		printf("\nEquilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(), Cl_e());
-	}
 
 }
 
@@ -913,8 +886,8 @@ void print_state (size_t iter, gsl_multiroot_fdfsolver * s){
 }
 
 struct rparams {
-	double p;
-	double c;
+	const double p;
+	const double c;
 };
 
 /* Given const phase fraction (p) and concentration (c), iteratively determine
@@ -923,7 +896,7 @@ struct rparams {
  * Cs and Cl by non-const reference to update in place. This allows use of this
  * single function to both populate the LUT and interpolate values based thereupon.
  */
-int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
+inline int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
 {
 	const double p = ((struct rparams *) params)->p;
 	const double c = ((struct rparams *) params)->c;
@@ -940,10 +913,9 @@ int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
 	return GSL_SUCCESS;
 }
 
-int commonTangent_df(const gsl_vector* x, void* params, gsl_matrix* J)
+inline int commonTangent_df(const gsl_vector* x, void* params, gsl_matrix* J)
 {
 	const double p = ((struct rparams *) params)->p;
-	//const double c = ((struct rparams *) params)->c; // not used in Jacobian
 
 	const double Cs = gsl_vector_get(x, 0);
 	const double Cl = gsl_vector_get(x, 1);
@@ -962,7 +934,7 @@ int commonTangent_df(const gsl_vector* x, void* params, gsl_matrix* J)
 	return GSL_SUCCESS;
 }
 
-int commonTangent_fdf(const gsl_vector* x, void* params, gsl_vector* f, gsl_matrix* J)
+inline int commonTangent_fdf(const gsl_vector* x, void* params, gsl_vector* f, gsl_matrix* J)
 {
 	commonTangent_f(x, params, f);
 	commonTangent_df(x, params, J);
@@ -972,16 +944,16 @@ int commonTangent_fdf(const gsl_vector* x, void* params, gsl_vector* f, gsl_matr
 
 template<class T> double iterateConc(const T& p, const T& c, T& Cs, T& Cl)
 {
-	// basic info
 	int status;
 	size_t i, iter = 0;
 	const size_t n = 2; // two equations
 
-	// Set initial guesses
+	// initial guesses
 	struct rparams par = {p, c};
+	const double Cs0(Cs), Cl0(Cl);
 	gsl_vector* x = gsl_vector_alloc(n);
-	gsl_vector_set(x, 0, Cs);
-	gsl_vector_set(x, 1, Cl);
+	gsl_vector_set(x, 0, Cs0);
+	gsl_vector_set(x, 1, Cl0);
 
 	// specify algorithm
 	const gsl_multiroot_fdfsolver_type* algorithm;
@@ -999,15 +971,12 @@ template<class T> double iterateConc(const T& p, const T& c, T& Cs, T& Cl)
 		if (status) // extra points for finishing early!
 			break;
 		status = gsl_multiroot_test_residual(solver->f, 1.0e-8);
-		//print_state(iter,s);
 	} while (status==GSL_CONTINUE && iter<1000);
 
-	Cs = gsl_vector_get(x, 0);
-	Cl = gsl_vector_get(x, 1);
+	Cs = static_cast<T>(gsl_vector_get(solver->x, 0));
+	Cl = static_cast<T>(gsl_vector_get(solver->x, 1));
 
-	double residual = 0.0;
-	for (i = 0; i < n ; i++)
-		residual += fabs(gsl_vector_get(solver->f, i));
+	double residual = gsl_blas_dnrm2 (solver->f);
 
 	gsl_multiroot_fdfsolver_free(solver);
 	gsl_vector_free(x);
