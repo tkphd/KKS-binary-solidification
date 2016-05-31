@@ -56,9 +56,9 @@ public:
 	    CLa = new double[nx*ny];
     	Ra = new double[nx*ny];
 
-		for (int i=0; i<nx; i++)
+		for (int i=0; i<int(nx); i++)
 			xa[i] = dx*(i+x0);
-		for (int j=0; j<ny; j++)
+		for (int j=0; j<int(ny); j++)
 			ya[j] = dy*(j+y0);
 
 	    // GSL interpolation function

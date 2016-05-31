@@ -41,9 +41,9 @@ const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explos
 const double CFL = 1.0/300.0; // controls timestep
 
 
-const bool useNeumann = true;
+const bool useNeumann = false;
 
-const bool planarTest = true;
+const bool planarTest = false;
 
 
 
@@ -88,6 +88,7 @@ void generate(int dim, const char* filename)
 	// Consider generating a free energy plot and lookup table.
 	bool nrg_not_found=true; // set False to disable energy plot, which may save a few minutes of work
 	bool lut_not_found=true; // LUT must exist -- do not disable!
+	/*
 	if (rank==0) {
 		if (1) {
 			std::ifstream fnrg("energy.csv");
@@ -102,6 +103,8 @@ void generate(int dim, const char* filename)
 			}
 		}
 	}
+	*/
+
 	#ifdef MPI_VERSION
 	MPI::COMM_WORLD.Bcast(&nrg_not_found,1,MPI_BOOL,0);
 	MPI::COMM_WORLD.Bcast(&lut_not_found,1,MPI_BOOL,0);
@@ -134,7 +137,6 @@ void generate(int dim, const char* filename)
 		*/
 		if (rank==0)
 			std::cout<<"Writing look-up table of Cs, Cl to consistentC.lut. Please be patient..."<<std::endl;
-		bool silent=true, randomize=true;
 		LUTGRID pureconc(3, -LUTmargin,LUTnp+LUTmargin+1, -LUTmargin,LUTnc+LUTmargin+1);
 		dx(pureconc,0) = dp; // different resolution in phi
 		dx(pureconc,1) = dc; // and c is not unreasonable
@@ -408,6 +410,22 @@ void generate(int dim, const char* filename)
 		printf("\nEquilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(), Cl_e());
 	}
 
+	if (rank==0) {
+		std::cout<<"Sanity check of iiterative solver"<<std::endl;
+		double values[4] = {0., 0.33, 0.67, 1.};
+		std::cout<<"phi\tc\tcs\tcl\tres"<<std::endl;
+		for (int j=0; j<4; j++)
+			for (int i=0; i<4; i++) {
+				double cs = 0.5;
+				double cl = 0.5;
+				double res = 1.;
+				res = iterateConc(values[i], values[j], cs, cl);
+				std::cout<<values[i]<<'\t'<<values[j]<<'\t'<<cs<<'\t'<<cl<<'\t'<<res<<std::endl;
+			}
+
+		printf("\nEquilibrium Cs=%.2f, Cl=%.2f\n", Cs_e(), Cl_e());
+	}
+
 }
 
 template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int steps)
@@ -621,7 +639,6 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			 * ============================== */
 
 
-			bool silent=true, randomize=false;
 			newGrid(n)[2] = Cs_old;
 			newGrid(n)[3] = Cl_old;
 			newGrid(n)[4] = interpolateConc(LUTinterp, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
@@ -857,7 +874,6 @@ void export_energy(bool silent)
 	const double cmin=-dc, cmax=1.0+dc;
 
 
-	bool randomize=true;
 
 	std::ofstream ef("energy.csv");
 	ef<<"p";
@@ -927,7 +943,7 @@ int commonTangent_f(const gsl_vector* x, void* params, gsl_vector* f)
 int commonTangent_df(const gsl_vector* x, void* params, gsl_matrix* J)
 {
 	const double p = ((struct rparams *) params)->p;
-	const double c = ((struct rparams *) params)->c;
+	//const double c = ((struct rparams *) params)->c; // not used in Jacobian
 
 	const double Cs = gsl_vector_get(x, 0);
 	const double Cl = gsl_vector_get(x, 1);
@@ -956,43 +972,33 @@ int commonTangent_fdf(const gsl_vector* x, void* params, gsl_vector* f, gsl_matr
 
 template<class T> double iterateConc(const T& p, const T& c, T& Cs, T& Cl)
 {
-	int rank=0;
-	#ifdef MPI_VERSION
-	rank=MPI::COMM_WORLD.Get_rank();
-	#endif
-
 	// basic info
 	int status;
 	size_t i, iter = 0;
 	const size_t n = 2; // two equations
 
-	// specify algorithm
-	const gsl_multiroot_fdfsolver_type *algorithm;
-	gsl_multiroot_fdfsolver *s;
-	algorithm = gsl_multiroot_fdfsolver_gnewton; // gnewton, hybridj, hybridsj, newton
-	s = gsl_multiroot_fdfsolver_alloc(algorithm, n);
-
-	double initials[4] = {0.};
-	initials[0] = p;
-	initials[1] = c;
-	initials[2] = Cs;
-	initials[3] = Cl;
-
-	struct rparams par = {initials[0], initials[1]};
-	gsl_multiroot_function_fdf mrf = {&commonTangent_f, &commonTangent_df, &commonTangent_fdf, n, &par};
+	// Set initial guesses
+	struct rparams par = {p, c};
 	gsl_vector* x = gsl_vector_alloc(n);
+	gsl_vector_set(x, 0, Cs);
+	gsl_vector_set(x, 1, Cl);
 
-	gsl_vector_set(x, 0, initials[2]);
-	gsl_vector_set(x, 1, initials[3]);
+	// specify algorithm
+	const gsl_multiroot_fdfsolver_type* algorithm;
+	algorithm = gsl_multiroot_fdfsolver_gnewton; // gnewton, hybridj, hybridsj, newton
+	gsl_multiroot_fdfsolver* solver;
+	solver = gsl_multiroot_fdfsolver_alloc(algorithm, n);
 
-	gsl_multiroot_fdfsolver_set(s, &mrf, x);
+	gsl_multiroot_function_fdf mrf = {&commonTangent_f, &commonTangent_df, &commonTangent_fdf, n, &par};
+
+	gsl_multiroot_fdfsolver_set(solver, &mrf, x);
 
 	do {
 		iter++;
-		status = gsl_multiroot_fdfsolver_iterate(s);
+		status = gsl_multiroot_fdfsolver_iterate(solver);
 		if (status) // extra points for finishing early!
 			break;
-		status = gsl_multiroot_test_residual(s->f, 1.0e-12);
+		status = gsl_multiroot_test_residual(solver->f, 1.0e-8);
 		//print_state(iter,s);
 	} while (status==GSL_CONTINUE && iter<1000);
 
@@ -1001,9 +1007,9 @@ template<class T> double iterateConc(const T& p, const T& c, T& Cs, T& Cl)
 
 	double residual = 0.0;
 	for (i = 0; i < n ; i++)
-		residual += fabs(gsl_vector_get(s->f, i));
+		residual += fabs(gsl_vector_get(solver->f, i));
 
-	gsl_multiroot_fdfsolver_free(s);
+	gsl_multiroot_fdfsolver_free(solver);
 	gsl_vector_free(x);
 
 	return residual;
