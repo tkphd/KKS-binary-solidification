@@ -16,7 +16,7 @@ KKS: KKS.cpp
 	$(compiler) $(flags) $< -o $@ -lz -lgsl -lgslcblas -fopenmp
 
 gKKS: KKS.cpp
-	g++ $(flags) $< -o $@ -lz -fopenmp
+	g++ $(flags) $< -o $@ -lz -lgsl -lgslcblas
 
 parallel: KKS.cpp
 	$(pcompiler) $(pflags) $< -o $@ -lz

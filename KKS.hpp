@@ -56,9 +56,9 @@ public:
 	    CLa = new double[nx*ny];
     	Ra = new double[nx*ny];
 
-		for (int i=0; i<int(nx); i++)
+		for (int i=0; i<nx; i++)
 			xa[i] = dx*(i+x0);
-		for (int j=0; j<int(ny); j++)
+		for (int j=0; j<ny; j++)
 			ya[j] = dy*(j+y0);
 
 	    // GSL interpolation function
@@ -111,14 +111,21 @@ public:
 
 	// accessor
 	double interpolate(const T& p, const T& c, T& Cs, T& Cl) {
-		  Cs = static_cast<T>(gsl_spline2d_eval(CSspline, p, c, xacc1, yacc1));
-		  Cl = static_cast<T>(gsl_spline2d_eval(CLspline, p, c, xacc2, yacc2));
-		return static_cast<T>(gsl_spline2d_eval(Rspline,  p, c, xacc3, yacc3));
+		double res = 1.0;
+		try {
+			Cs = static_cast<T>(gsl_spline2d_eval(CSspline, p, c, xacc1, yacc1));
+			Cl = static_cast<T>(gsl_spline2d_eval(CLspline, p, c, xacc2, yacc2));
+			res = static_cast<T>(gsl_spline2d_eval(Rspline,  p, c, xacc3, yacc3));
+		} catch (int e) {
+			printf("GSL interp2d error: phi=%.2f, c=%.2f\n", p, c);
+			std::exit(-1);
+		}
+		return res;
 	}
 
 private:
-    size_t nx;
-    size_t ny;
+    int nx;
+    int ny;
     double* xa;
     double* ya;
 

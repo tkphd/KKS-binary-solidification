@@ -38,10 +38,10 @@ const double  Cse =  0.3,  Cle =  0.7;   // equilibrium concentration
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
-const double CFL = 1.0/300.0; // controls timestep
+const double CFL = 1.0/200.0; // controls timestep
 
 
-const bool useNeumann = false;
+const bool useNeumann = true;
 
 const bool planarTest = false;
 
@@ -55,13 +55,13 @@ const double halfwidth = 2.25*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
 const double dt = 2.0*CFL*pow(meshres,2.0)/eps_sq;
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = (Cse+Cle)/2.0 + 0.01;  // initial solid concentration
-const double cBl = (Cse+Cle)/2.0 - 0.001;  // initial liquid concentration
+const double cBs = (Cse+Cle)/2.0 /*+ 0.01*/;  // initial solid concentration
+const double cBl = (Cse+Cle)/2.0 /*- 0.001*/;  // initial liquid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
-const int LUTnc = 1000;  // number of points along c-axis
-const int LUTnp = 1000;  // number of points along p-axis
-const int LUTmargin = 2; // number of points below zero and above one
+const int LUTnc = 1250;        // number of points along c-axis
+const int LUTnp = 1250;        // number of points along p-axis
+const int LUTmargin = LUTnc/8; // number of points below zero and above one
 const double dp = 1.0/LUTnp;
 const double dc = 1.0/LUTnc;
 
@@ -141,16 +141,14 @@ void generate(int dim, const char* filename)
 		dx(pureconc,0) = dp; // different resolution in phi
 		dx(pureconc,1) = dc; // and c is not unreasonable
 
-		/*
 		#ifndef MPI_VERSION
-		#pragma omp parallel for
+		#pragma omp parallel for schedule(dynamic)
 		#endif
-		*/
 		for (int n=0; n<nodes(pureconc); n++) {
 			simple_progress(n,nodes(pureconc));
 			vector<int> x = position(pureconc,n);
-			pureconc(n)[0] = 1.0 - dc*x[1]; // guess Cs
-			pureconc(n)[1] = 1.0 - dc*x[1]; // guess Cl
+			pureconc(n)[0] = 0.5; // guess Cs
+			pureconc(n)[1] = 0.5; // guess Cl
 			pureconc(n)[2] = iterateConc(dp*x[0], dc*x[1], pureconc(n)[0], pureconc(n)[1]);
 		}
 
@@ -194,8 +192,7 @@ void generate(int dim, const char* filename)
 	vector<double> liquidValue(7, 0.0);
 	liquidValue[0] = pl0;
 	liquidValue[1] = cBl;
-	liquidValue[2] = 0.5;
-	liquidValue[3] = 0.5;
+	liquidValue[2] = liquidValue[3] = 0.5;
 	liquidValue[4] = iterateConc(liquidValue[0], liquidValue[1], liquidValue[2], liquidValue[3]);
 	liquidValue[5] = liquidValue[6] = 0.0;
 
@@ -226,6 +223,7 @@ void generate(int dim, const char* filename)
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid);
 		}
 		// Add gradient to ftot
+		ghostswap(initGrid);
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> s = position(initGrid,n);
 			double gradPsq = 0.0;
@@ -297,6 +295,7 @@ void generate(int dim, const char* filename)
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid);
 		}
 		// Add gradient to ftot
+		ghostswap(initGrid);
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> s = position(initGrid,n);
 			double gradPsq = 0.0;
@@ -356,6 +355,7 @@ void generate(int dim, const char* filename)
 			ftot += f(initGrid(n)[0], initGrid(n)[1], initGrid(n)[2], initGrid(n)[3])*dx(initGrid)*dy(initGrid)*dz(initGrid);
 		}
 		// Add gradient to ftot
+		ghostswap(initGrid);
 		for (int n=0; n<nodes(initGrid); n++) {
 			vector<int> s = position(initGrid,n);
 			double gradPsq = 0.0;
@@ -479,78 +479,56 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				    x0(oldGrid,d) == g0(oldGrid,d) &&
 				    useNeumann)
 				{
-					// Based on the "Right-sided second order difference"
-					// Get central values
-					const T& p0 = oldGrid(s)[0];
-					const T& c0 = oldGrid(s)[1];
-					const T& S0 = oldGrid(s)[2];
-					const T& L0 = oldGrid(s)[3];
-					const T Mp0 = Q(p0,S0,L0)*hprime(p0)*(L0-S0);
-					const T Mc0 = Q(p0,S0,L0);
-					// Get middle values
-					s[d] += 1;
-					const T& p1 = oldGrid(s)[0];
-					const T& c1 = oldGrid(s)[1];
-					const T& S1 = oldGrid(s)[2];
-					const T& L1 = oldGrid(s)[3];
-					const T Mp1 = Q(p1,S1,L1)*hprime(p1)*(L1-S1);
-					const T Mc1 = Q(p1,S1,L1);
+					// Central second-order difference at lower boundary:
+					// grad(phi)_(i-1/2) is defined to be 0
 					// Get high values
 					s[d] += 1;
-					const T& p2 = oldGrid(s)[0];
-					const T& c2 = oldGrid(s)[1];
-					const T& S2 = oldGrid(s)[2];
-					const T& L2 = oldGrid(s)[3];
-					const T Mp2 = Q(p2,S2,L2)*hprime(p2)*(L2-S2);
-					const T Mc2 = Q(p2,S2,L2);
-					// Get very high value
-					s[d] += 1;
-					const T& p3 = oldGrid(s)[0];
+					const T& ph = oldGrid(s)[0];
+					const T& ch = oldGrid(s)[1];
+					const T& Sh = oldGrid(s)[2];
+					const T& Lh = oldGrid(s)[3];
+					const T Mph = Q(ph,Sh,Lh)*hprime(ph)*(Lh-Sh);
+					const T Mch = Q(ph,Sh,Lh);
+					// Get central values
+					s[d] -= 1;
+					const T& pc = oldGrid(s)[0];
+					const T& cc = oldGrid(s)[1];
+					const T& Sc = oldGrid(s)[2];
+					const T& Lc = oldGrid(s)[3];
+					const T Mpc = Q(pc,Sc,Lc)*hprime(pc)*(Lc-Sc);
+					const T Mcc = Q(pc,Sc,Lc);
 
-					// Re-center and put 'em all together
-					s[d] -= 3;
-
-					divGradP += 0.25*weight*( 3.0*(Mp1+Mp0)*(p1-p0) - (Mp2+Mp1)*(p2-p1) );
-					divGradC += 0.25*weight*( 3.0*(Mc1+Mc0)*(c1-c0) - (Mc2+Mc1)*(c2-c1) );
-					lapPhi   += weight*(2.0*p0 - 5.0*p1 + 4.0*p2 - p3);
-				} else if (x[d]==x1(oldGrid,d)-1 &&
-				           x1(oldGrid,d)==g1(oldGrid,d) &&
+					// Put 'em all together
+					divGradP += 0.5*weight*( (Mph+Mpc)*(ph-pc) );
+					divGradC += 0.5*weight*( (Mch+Mcc)*(ch-cc) );
+					lapPhi   += weight*(ph - pc);
+				} else if (x[d] == x1(oldGrid,d)-1 &&
+				           x1(oldGrid,d) == g1(oldGrid,d) &&
 				           useNeumann)
 				{
-					// Based on the "Left-sided second order difference"
-					// Get central values
-					const T& p3 = oldGrid(s)[0];
-					const T& c3 = oldGrid(s)[1];
-					const T& S3 = oldGrid(s)[2];
-					const T& L3 = oldGrid(s)[3];
-					const T Mp3 = Q(p3,S3,L3)*hprime(p3)*(L3-S3);
-					const T Mc3 = Q(p3,S3,L3);
-					// Get middle values
-					s[d] -= 1;
-					const T& p2 = oldGrid(s)[0];
-					const T& c2 = oldGrid(s)[1];
-					const T& S2 = oldGrid(s)[2];
-					const T& L2 = oldGrid(s)[3];
-					const T Mp2 = Q(p2,S2,L2)*hprime(p2)*(L2-S2);
-					const T Mc2 = Q(p2,S2,L2);
+					// Central second-order difference at upper boundary:
+					// grad(phi)_(i+1/2) is defined to be 0
 					// Get low values
 					s[d] -= 1;
-					const T& p1 = oldGrid(s)[0];
-					const T& c1 = oldGrid(s)[1];
-					const T& S1 = oldGrid(s)[2];
-					const T& L1 = oldGrid(s)[3];
-					const T Mp1 = Q(p1,S1,L1)*hprime(p1)*(L1-S1);
-					const T Mc1 = Q(p1,S1,L1);
-					// Get very low value
-					s[d] -= 1;
-					const T& p0 = oldGrid(s)[0];
+					const T& pl = oldGrid(s)[0];
+					const T& cl = oldGrid(s)[1];
+					const T& Sl = oldGrid(s)[2];
+					const T& Ll = oldGrid(s)[3];
+					const T Mpl = Q(pl,Sl,Ll)*hprime(pl)*(Ll-Sl);
+					const T Mcl = Q(pl,Sl,Ll);
+					// Get central values
+					s[d] += 1;
+					const T& pc = oldGrid(s)[0];
+					const T& cc = oldGrid(s)[1];
+					const T& Sc = oldGrid(s)[2];
+					const T& Lc = oldGrid(s)[3];
+					const T Mpc = Q(pc,Sc,Lc)*hprime(pc)*(Lc-Sc);
+					const T Mcc = Q(pc,Sc,Lc);
 
-					// Re-center and put 'em all together
-					s[d] += 3;
-
-					divGradP += 0.25*weight*( 3.0*(Mp3+Mp2)*(p3-p2) - (Mp2+Mp1)*(p2-p1) );
-					divGradC += 0.25*weight*( 3.0*(Mc3+Mc2)*(c3-c2) - (Mc2+Mc1)*(c2-c1) );
-					lapPhi   += weight*(2.0*p3 - 5.0*p2 + 4.0*p1 - p0);
+					// Put 'em all together
+					divGradP += 0.5*weight*( - (Mpc+Mpl)*(pc-pl) );
+					divGradC += 0.5*weight*( - (Mcc+Mcl)*(cc-cl) );
+					lapPhi   += weight*(pl - pc);
 				} else {
 					// Central second-order difference
 					// Get low values
@@ -616,6 +594,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			newGrid(n)[3] = Cl_old;
 			newGrid(n)[4] = interpolateConc(LUTinterp, newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
 			//newGrid(n)[4] = iterateConc(newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
+
 
 			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
 			double myc = dV*newGrid(n)[1];
@@ -970,7 +949,7 @@ template<class T> double iterateConc(const T& p, const T& c, T& Cs, T& Cl)
 		status = gsl_multiroot_fdfsolver_iterate(solver);
 		if (status) // extra points for finishing early!
 			break;
-		status = gsl_multiroot_test_residual(solver->f, 1.0e-8);
+		status = gsl_multiroot_test_residual(solver->f, 1.0e-12);
 	} while (status==GSL_CONTINUE && iter<1000);
 
 	Cs = static_cast<T>(gsl_vector_get(solver->x, 0));
