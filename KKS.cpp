@@ -36,7 +36,7 @@ const double CFL = 1.0/10.0; // controls timestep
 
 const bool useNeumann = true;
 
-const bool planarTest = true;
+const bool planarTest = false;
 
 
 // Kinetic and model parameters
@@ -49,19 +49,19 @@ const double dt_plimit = 2.0*CFL*pow(meshres,2.0)/eps_sq;
 const double dt_climit = 2.0*CFL*pow(meshres,2.0)/Q(0.0, 0.5, 0.5);
 const double dt = std::min(dt_plimit, dt_climit);
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = 0.525*(Cse+Cle);  // initial solid concentration
-const double cBl = 0.525*(Cse+Cle);  // initial liquid concentration
+const double cBs = Cle + 0.89*(Cse-Cle); // initial solid concentration
+const double cBl = Cle + 0.89*(Cse-Cle); // initial solid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
 const int LUTnc = 1000;        // number of points along c-axis
 const int LUTnp = 1000;        // number of points along p-axis
-const int LUTmargin = 8; // number of points below zero and above one
+const int LUTmargin = 1; // number of points below zero and above one
 const double LUTdp = 1.0/LUTnp;
 const double LUTdc = 1.0/LUTnc;
 const double LUTpmin = -LUTdp*LUTmargin;
-const double LUTpmax =  LUTdp*(LUTnp+LUTmargin-1);
+const double LUTpmax =  LUTdp*(LUTnp+LUTmargin);
 const double LUTcmin = -LUTdc*LUTmargin;
-const double LUTcmax =  LUTdc*(LUTnc+LUTmargin-1);
+const double LUTcmax =  LUTdc*(LUTnc+LUTmargin);
 
 
 /* =============================================== *
@@ -393,6 +393,32 @@ void generate(int dim, const char* filename)
 	if (rank==0)
 		printf("\nEquilibrium Cs=%.2f, Cl=%.2f. Timestep dt=%.2e\n", Cs_e(), Cl_e(), dt);
 
+	if (1) {
+		interpolator LUTinterp(pureconc);
+		double least[3] = {100., 100., 100.};
+		double most[3] = {0., 0., 0.};
+		for (double cc = Cle; cc<= Cse; cc+=0.01) {
+			for (double pp = 0.0; pp <= 1.0; pp+=0.01) {
+				double S, L;
+				LUTinterp.interpolate(pp, cc, S, L);
+				double D = Q(pp,S,L)*hprime(cc)*(S-L);
+				if (D < least[2]) {
+					least[2] = D;
+					least[0] = pp;
+					least[1] = cc;
+				}
+				if (D > most[2]) {
+					most[2] = D;
+					most[0] = pp;
+					most[1] = cc;
+				}
+			}
+		}
+		std::cout<<"Least diffusivity,    Q()*h'()*(Cs-Cl) = "<<least[2]<<" for phi="<<least[0]<<", c="<<least[1]<<std::endl;
+		std::cout<<"Greatest diffusivity, Q()*h'()*(Cs-Cl) = "<<most[2]<< " for phi="<<most[0]<< ", c="<<most[1]<<std::endl;
+	}
+
+
 }
 
 template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int steps)
@@ -653,12 +679,14 @@ void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int ran
 
 double h(const double p)
 {
-	return pow(p,3.0) * (6.0*p*p - 15.0*p + 10.0);
+	return p;
+	//return pow(p,3.0) * (6.0*p*p - 15.0*p + 10.0);
 }
 
 double hprime(const double p)
 {
-	return 30.0 * pow(p,2.0)*pow(1.0-p,2.0);
+	return 1.0;
+	//return 30.0 * pow(p,2.0)*pow(1.0-p,2.0);
 }
 
 double g(const double p)
@@ -689,14 +717,16 @@ double k(const double Cs, const double Cl)
 
 double Q(const double p, const double Cs, const double Cl)
 {
-	const double Qmin = 0.01;
-    return Qmin + (1.0 - Qmin) * (1.0-p)/(1.0 + k(Cs, Cl) - (1.0-k(Cs, Cl))*p);
+	//const double Qmin = 0.1;
+    //return Qmin + (1.0 - Qmin) * (1.0-p)/(1.0 + k(Cs, Cl) - (1.0-k(Cs, Cl))*p);
+    return 0.5;
 }
 
 double Qprime(const double p, const double Cs, const double Cl)
 {
-    return (-(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p)-(1.0-p)*(k(Cs, Cl)-1.0))
-            / pow(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p,2.0);
+    //return (-(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p)-(1.0-p)*(k(Cs, Cl)-1.0))
+    //        / pow(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p,2.0);
+    return 0.0;
 }
 
 
