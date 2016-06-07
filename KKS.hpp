@@ -21,6 +21,45 @@ typedef MMSP::grid<2,MMSP::vector<double> > LUTGRID;
 
 
 
+// Interface interpolation function
+double h(const double p);
+double hprime(const double p);
+
+// Double well potential
+double g(const double p);
+double gprime(const double p);
+
+double k(); // equilibrium partition coefficient for solidification
+
+// phase-field diffusivity
+double Q(const double p, const double Cs, const double Cl);
+
+double fl(const double c);       // liquid free energy density
+
+double fs(const double c);       // solid free energy density
+
+double dfl_dc(const double c);   // first derivative of fl w.r.t. c
+
+double dfs_dc(const double c);   // first derivative of fs w.r.t. c
+
+double d2fl_dc2(const double c); // second derivative of fl w.r.t. c
+
+double d2fs_dc2(const double c); // second derivative of fs w.r.t. c
+
+double R(const double p, const double Cs, const double Cl); // denominator for dCs, dCl, df
+
+double dCl_dc(const double p, const double Cs, const double Cl); // first derivative of Cl w.r.t. c
+
+double dCs_dc(const double p, const double Cs, const double Cl); // first derivative of Cs w.r.t. c
+
+double f(const double p, const double c, const double Cs, const double Cl); // free energy density
+
+double d2f_dc2(const double p, const double c, const double Cs, const double Cl); // second derivative of f w.r.t. c
+
+void simple_progress(int step, int steps); // thread-compatible pared-down version of print_progress
+
+template<int dim, typename T> void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int rank);
+
 /* Given const phase fraction (p) and concentration (c), iteratively determine
  * the solid (Cs) and liquid (Cl) fictitious concentrations that satisfy the
  * equal chemical potential constraint. Pass p and c by const value,
@@ -102,46 +141,4 @@ private:
 
 };
 
-// Interface interpolation function
-double h(const double p);
-double hprime(const double p);
-
-// Double well potential
-double g(const double p);
-double gprime(const double p);
-
-double Cl_e(); // equilbrium composition of liquid phase
-double Cs_e(); // equilbrium composition of solid phase
-double k(const double Cs, const double Cl); // equilibrium partition coefficient for solidification
-
-// phase-field diffusivity
-double Q(const double p, const double Cs, const double Cl);
-double Qprime(const double p, const double Cs, const double Cl);
-
-double fl(const double c);       // liquid free energy density
-
-double fs(const double c);       // solid free energy density
-
-double dfl_dc(const double c);   // first derivative of fl w.r.t. c
-
-double dfs_dc(const double c);   // first derivative of fs w.r.t. c
-
-double d2fl_dc2(const double c); // second derivative of fl w.r.t. c
-
-double d2fs_dc2(const double c); // second derivative of fs w.r.t. c
-
-double R(const double p, const double Cs, const double Cl); // denominator for dCs, dCl, df
-
-double dCl_dc(const double p, const double Cs, const double Cl); // first derivative of Cl w.r.t. c
-
-double dCs_dc(const double p, const double Cs, const double Cl); // first derivative of Cs w.r.t. c
-
-double f(const double p, const double c, const double Cs, const double Cl); // free energy density
-
-double d2f_dc2(const double p, const double c, const double Cs, const double Cl); // second derivative of f w.r.t. c
-
-void simple_progress(int step, int steps); // thread-compatible pared-down version of print_progress
-
-void export_energy(); // exports free energy curves to energy.csv
-
-template<int dim, typename T> void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int rank);
+void export_energy(rootsolver& NRGsolver); // exports free energy curves to energy.csv

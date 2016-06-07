@@ -1,5 +1,7 @@
 // KKS.cpp
 // Algorithms for 2D and 3D isotropic binary alloy solidification
+// using RWTH database for Cu-Ni system, CuNi_RWTH.tdb,
+// extracted from the COST507 Light Alloys Database.
 // Questions/comments to trevor.keller@nist.gov (Trevor Keller)
 
 // This implementation depends on the GNU Scientific Library
@@ -20,18 +22,20 @@
 
 // Note: KKS.hpp contains important declarations and comments. Have a look.
 
-// 10-th order polynomial fitting coefficients from PyCALPHAD
+// 10-th order polynomial fitting coefficients from CALPHAD
 double calCs[11] = { 6.19383857e+03,-3.09926825e+04, 6.69261368e+04,-8.16668934e+04,
                      6.19902973e+04,-3.04134700e+04, 9.74968659e+03,-2.04529002e+03,
                      2.95622845e+02,-3.70962613e+01,-6.12900561e+01};
 double calCl[11] = { 6.18692878e+03,-3.09579439e+04, 6.68516329e+04,-8.15779791e+04,
                      6.19257214e+04,-3.03841489e+04, 9.74145735e+03,-2.04379606e+03,
                      2.94796431e+02,-3.39127135e+01,-6.26373908e+01};
-const double  Cse = 0.48300,  Cle = 0.33886;    // equilibrium concentration
+
+// Solidus and Liquidus compositions from CALPHAD
+const double Cse = 0.5413,  Cle = 0.3940;
 
 // Numerical stability (Courant-Friedrich-Lewy) parameters
 const double epsilon = 1.0e-10;  // what to consider zero to avoid log(c) explosions
-const double CFL = 1.0/10.0; // controls timestep
+const double CFL = 0.2; // controls timestep
 
 
 const bool useNeumann = true;
@@ -45,12 +49,12 @@ const double eps_sq = 1.25;
 const double a_int = 2.5; // alpha, prefactor of interface width
 const double halfwidth = 5.0*meshres; // half the interface width
 const double omega = 2.0*eps_sq*pow(a_int/halfwidth,2.0);
-const double dt_plimit = 2.0*CFL*pow(meshres,2.0)/eps_sq;
-const double dt_climit = 2.0*CFL*pow(meshres,2.0)/Q(0.0, 0.5, 0.5);
+const double dt_plimit = CFL*meshres/eps_sq;          // speed limit based on numerical viscosity
+const double dt_climit = CFL*pow(meshres,2.0)/eps_sq; // speed limit based on diffusion timescale
 const double dt = std::min(dt_plimit, dt_climit);
 const double ps0 = 1.0, pl0 = 0.0; // initial phase fractions
-const double cBs = Cle + 0.89*(Cse-Cle); // initial solid concentration
-const double cBl = Cle + 0.89*(Cse-Cle); // initial solid concentration
+const double cBs = Cle + 0.50*(Cse-Cle); // initial solid concentration
+const double cBl = Cle + 0.50*(Cse-Cle); // initial solid concentration
 
 // Resolution of the constant chem. pot. composition lookup table
 const int LUTnc = 1000;        // number of points along c-axis
@@ -82,9 +86,6 @@ void generate(int dim, const char* filename)
 	 * Construct look-up table for fast enforcement of equal chemical potential *
 	 * ======================================================================== */
 
-	// Construct solver for LUT generation
-	rootsolver LUTsolver;
-
 	// Consider generating a free energy plot and lookup table.
 	bool nrg_not_found=true; // set False to disable energy plot, which may save a few minutes of work
 	bool lut_not_found=true; // LUT must exist -- do not disable!
@@ -109,6 +110,9 @@ void generate(int dim, const char* filename)
 	MPI::COMM_WORLD.Barrier();
 	#endif
 
+	// Construct solver for LUT generation
+	rootsolver LUTsolver;
+
 	if (nrg_not_found) {
 		// Print out the free energy for phi in [-0.01,1.01] with slices of c in [-0.01,1.01] for inspection.
 		if (rank==0)
@@ -117,7 +121,7 @@ void generate(int dim, const char* filename)
 		#ifdef MPI_VERSION
 		MPI::COMM_WORLD.Barrier();
 		#endif
-		if (rank==0) export_energy();
+		if (rank==0) export_energy(LUTsolver);
 		#ifdef MPI_VERSION
 		MPI::COMM_WORLD.Barrier();
 		#endif
@@ -173,7 +177,7 @@ void generate(int dim, const char* filename)
 	   1. c, concentration of component A
 	   2. Cs, fictitious composition of solid
 	   3. Cl, fictitious composition of liquid
-	   4. Residual associated with Cs,Cl computation
+	   4. deviation from equilibrium (chemical potential difference)
 	 */
 	vector<double> solidValue(4, 0.0);
 	solidValue[0] = ps0;
@@ -249,12 +253,12 @@ void generate(int dim, const char* filename)
 		#endif
 		if (rank==0) {
 			std::ofstream cfile("c.log");
-			cfile<<ctot<<'\t'<<ftot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<'\t'<<CFL<<'\t'<<1.0<<std::endl;
 			cfile.close();
 		}
 
 	} else if (dim==2) {
-		int L = planarTest ? 1000 : 64;
+		int L = planarTest ? 1000 : 256;
 		int Ly = 32;
 		GRID2D initGrid(4,0,L,0,Ly);
 		for (int d=0; d<dim; d++) {
@@ -276,10 +280,11 @@ void generate(int dim, const char* filename)
 					initGrid(n).copy(liquidValue);
 			} else {
 				double ra = 15.0, rb = 8.0, rc = 8.0;
+				double offset = 64.0;
 				// Circular interfaces
-				if ( (pow(x[0] - (ra+1   ),2) + pow(x[1] - (L/2-ra-1  ),2) < ra*ra) ||
-				     (pow(x[0] - 0.625*(L),2) + pow(x[1] - (L/2-rb-1  ),2) < rb*rb) ||
-				     (pow(x[0] - (L-rc-1 ),2) + pow(x[1] - (rc+1),2) < rc*rc)
+				if ( (pow(x[0] - (ra+1   ),2) + pow(x[1] - (offset/2-ra-1  ),2) < ra*ra) ||
+				     (pow(x[0] - 0.625*(offset),2) + pow(x[1] - (offset/2-rb-1  ),2) < rb*rb) ||
+				     (pow(x[0] - (offset-rc-1 ),2) + pow(x[1] - (rc+1),2) < rc*rc)
 				)
 					initGrid(n).copy(solidValue);
 				else
@@ -322,7 +327,7 @@ void generate(int dim, const char* filename)
 		#endif
 		if (rank==0) {
 			std::ofstream cfile("c.log");
-			cfile<<ctot<<'\t'<<ftot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<'\t'<<CFL<<'\t'<<1.0<<std::endl;
 			cfile.close();
 		}
 	} else if (dim==3) {
@@ -382,7 +387,7 @@ void generate(int dim, const char* filename)
 		#endif
 		if (rank==0) {
 			std::ofstream cfile("c.log");
-			cfile<<ctot<<'\t'<<ftot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<'\t'<<CFL<<'\t'<<1.0<<std::endl;
 			cfile.close();
 		}
 	} else {
@@ -391,33 +396,7 @@ void generate(int dim, const char* filename)
 	}
 
 	if (rank==0)
-		printf("\nEquilibrium Cs=%.2f, Cl=%.2f. Timestep dt=%.2e\n", Cs_e(), Cl_e(), dt);
-
-	if (1) {
-		interpolator LUTinterp(pureconc);
-		double least[3] = {100., 100., 100.};
-		double most[3] = {0., 0., 0.};
-		for (double cc = Cle; cc<= Cse; cc+=0.01) {
-			for (double pp = 0.0; pp <= 1.0; pp+=0.01) {
-				double S, L;
-				LUTinterp.interpolate(pp, cc, S, L);
-				double D = Q(pp,S,L)*hprime(cc)*(S-L);
-				if (D < least[2]) {
-					least[2] = D;
-					least[0] = pp;
-					least[1] = cc;
-				}
-				if (D > most[2]) {
-					most[2] = D;
-					most[0] = pp;
-					most[1] = cc;
-				}
-			}
-		}
-		std::cout<<"Least diffusivity,    Q()*h'()*(Cs-Cl) = "<<least[2]<<" for phi="<<least[0]<<", c="<<least[1]<<std::endl;
-		std::cout<<"Greatest diffusivity, Q()*h'()*(Cs-Cl) = "<<most[2]<< " for phi="<<most[0]<< ", c="<<most[1]<<std::endl;
-	}
-
+		printf("\nEquilibrium Cs=%.2f, Cl=%.2f. Timestep dt=%.2e\n", Cse, Cle, dt);
 
 }
 
@@ -467,11 +446,15 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 		if (rank==0)
 			print_progress(step, steps);
 
-		double ctot=0.0, ftot=0.0;
+		double ctot=0.0, ftot=0.0, utot=0.0, vmax=0.0;
 		#ifndef MPI_VERSION
 		#pragma omp parallel for
 		#endif
 		for (int n=0; n<nodes(oldGrid); n++) {
+			/* ============================================== *
+			 * Point-wise kernel for parallel PDE integration *
+			 * ============================================== */
+
 			vector<int> x = position(oldGrid,n);
 
 			// Cache some frequently-used reference values
@@ -480,9 +463,10 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			const T& Cs_old  = oldGrid(n)[2];
 			const T& Cl_old  = oldGrid(n)[3];
 
-			// Compute divergence of c, phi using half-steps in space for second-order accuracy,
-			// laplacian of phi (alone, since built-in Laplacian returns all fields),
-			// and grad(phi)^2 for free energy computation
+
+			/* ======================================= *
+			 * Compute Second-Order Finite Differences *
+			 * ======================================= */
 
 			double divGradP = 0.0;
 			double divGradC = 0.0;
@@ -490,10 +474,6 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			double gradPsq = 0.0;
 			vector<int> s(x);
 			for (int d=0; d<dim; d++) {
-				// Second-order differencing requires consistent schemes at the boundaries.
-				// Implemented after Strikwerda 2004 (p. 152) and KTH CFD coursenotes,
-				//     http://www.mech.kth.se/~ardeshir/courses/literature/fd.pdf
-				// with guessed handling of variable coefficients
 				double weight = 1.0/pow(dx(oldGrid,d), 2.0);
 
 				if (x[d] == x0(oldGrid,d) &&
@@ -501,7 +481,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				    useNeumann)
 				{
 					// Central second-order difference at lower boundary:
-					// grad(phi)_(i-1/2) is defined to be 0
+					// Flux_lo = grad(phi)_(i-1/2) is defined to be 0
 					// Get high values
 					s[d] += 1;
 					const T& ph = oldGrid(s)[0];
@@ -528,7 +508,7 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				           useNeumann)
 				{
 					// Central second-order difference at upper boundary:
-					// grad(phi)_(i+1/2) is defined to be 0
+					// Flux_hi = grad(phi)_(i+1/2) is defined to be 0
 					// Get low values
 					s[d] -= 1;
 					const T& pl = oldGrid(s)[0];
@@ -585,60 +565,86 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 				}
 			}
 
-			/* ==================================== *
-			 * Solve the Equation of Motion for phi *
-			 * ==================================== */
+			/* ==================================================================== *
+			 * Solve the Equation of Motion for phi: Kim, Kim, & Suzuki Equation 31 *
+			 * ==================================================================== */
 
-			// Provatas & Elder: Eqn. 6.97
 			newGrid(n)[0] = phi_old + dt*( eps_sq*lapPhi - omega*gprime(phi_old)
 			                               + hprime(phi_old)*( fl(Cl_old)-fs(Cs_old)-(Cl_old-Cs_old)*dfl_dc(Cl_old) ));
 
 
-			/* ================================== *
-			 * Solve the Equation of Motion for c *
-			 * ================================== */
+			/* ================================================================== *
+			 * Solve the Equation of Motion for c: Kim, Kim, & Suzuki Equation 33 *
+			 * ================================================================== */
 
-			// Kim, Kim, & Suzuki: Eqn. 33
 			newGrid(n)[1] = c_old + dt*(divGradC + divGradP);
 
 
-			/* ============================== *
-			 * Determine consistent Cs and Cl *
-			 * ============================== */
+			/* ================================================== *
+			 * Interpolate consistent Cs and Cl from lookup table *
+			 * ================================================== */
 
-
-			newGrid(n)[2] = Cs_old;
-			newGrid(n)[3] = Cl_old;
 			LUTinterp.interpolate(newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
-			// LUTsolver.solve(newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]);
 
-			// Update total mass and energy, using critical block containing as little arithmetic as possible, in OpenMP- and MPI-compatible manner
+
+			/* ====================================================================== *
+			 * Collate summary & diagnostic data in OpenMP- and MPI-compatible manner *
+			 * ====================================================================== */
+
 			double myc = dV*newGrid(n)[1];
 			double myf = dV*(0.5*eps_sq*gradPsq + f(newGrid(n)[0], newGrid(n)[1], newGrid(n)[2], newGrid(n)[3]));
+			double myv = 0.0;
+			if (newGrid(n)[0]>0.3 && newGrid(n)[0]<0.7) {
+				gradPsq = 0.0;
+				for (int d=0; d<dim; d++) {
+					double weight = 1.0/pow(dx(newGrid,d), 2.0);
+					s[d] -= 1;
+					const T& pl = newGrid(s)[0];
+					s[d] += 2;
+					const T& ph = newGrid(s)[0];
+					s[d] -= 1;
+					gradPsq  += weight * pow(0.5*(ph-pl), 2.0);
+				}
+				myv = (newGrid(n)[0] - phi_old) / (dt * std::sqrt(gradPsq));
+			}
+			double myu = (fl(newGrid(n)[3])-fs(newGrid(n)[2]))/(Cle - Cse);
+
 			#ifndef MPI_VERSION
 			#pragma omp critical
 			{
 			#endif
-			ctot += myc;
-			ftot += myf;
+			vmax = std::max(vmax,myv); // maximum velocity
+			ctot += myc;               // total mass
+			ftot += myf;               // total free energy
+			utot += myu*myu;           // deviation from equilibrium
 			#ifndef MPI_VERSION
 			}
 			#endif
 
-			// ~ fin ~
+			/* ======= *
+			 * ~ fin ~ *
+			 * ======= */
 		}
 		swap(oldGrid,newGrid);
 		ghostswap(oldGrid);
 
-		// Compute total mass
+		double ntot(nodes(oldGrid));
 		#ifdef MPI_VERSION
+		double myvm(vmax);
 		double myct(ctot);
 		double myft(ftot);
+		double myut(utot);
+		double myn(ntot);
 		MPI::COMM_WORLD.Allreduce(&myct, &ctot, 1, MPI_DOUBLE, MPI_SUM);
 		MPI::COMM_WORLD.Allreduce(&myft, &ftot, 1, MPI_DOUBLE, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myvm, &vmax, 1, MPI_DOUBLE, MPI_MAX);
+		MPI::COMM_WORLD.Allreduce(&myut, &utot, 1, MPI_DOUBLE, MPI_SUM);
+		MPI::COMM_WORLD.Allreduce(&myn,  &ntot, 1, MPI_DOUBLE, MPI_SUM);
 		#endif
+		double CFLmax = (vmax * dt) / meshres;
+		utot = std::sqrt(utot/ntot);
 		if (rank==0)
-			cfile<<ctot<<'\t'<<ftot<<std::endl;
+			cfile<<ctot<<'\t'<<ftot<<'\t'<<CFLmax<<'\t'<<utot<<std::endl;
 	}
 	if (rank==0)
 		cfile.close();
@@ -669,8 +675,8 @@ void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int ran
 	cTot /= nTot;
 	double wps = (100.0*pTot)/nTot;
 	double wpl = (100.0*(nTot-pTot))/nTot;
-	double fs = 100.0*(cTot - Cl_e())/(Cs_e()-Cl_e());
-	double fl = 100.0*(Cs_e() - cTot)/(Cs_e()-Cl_e());
+	double fs = 100.0*(cTot - Cle)/(Cse-Cle);
+	double fl = 100.0*(Cse - cTot)/(Cse-Cle);
 	if (rank==0)
 		printf("System has %.2f%% solid, %.2f%% liquid, and composition %.2f%% B. Equilibrium is %.2f%% solid, %.2f%% liquid.\n",
 		       wps, wpl, 100.0*cTot, fs, fl);
@@ -680,13 +686,11 @@ void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int ran
 double h(const double p)
 {
 	return p;
-	//return pow(p,3.0) * (6.0*p*p - 15.0*p + 10.0);
 }
 
 double hprime(const double p)
 {
 	return 1.0;
-	//return 30.0 * pow(p,2.0)*pow(1.0-p,2.0);
 }
 
 double g(const double p)
@@ -699,36 +703,17 @@ double gprime(const double p)
 	return 2.0*p * (1.0-p)*(1.0-2.0*p);
 }
 
-double Cl_e()
+double k()
 {
-	return Cle;
-}
-
-double Cs_e()
-{
-	return Cse;
-}
-
-double k(const double Cs, const double Cl)
-{
-	// Partition coefficient, from solving dfs_dc = 0 and dfl_dc = 0
-	return Cs_e()/Cl_e();
+	// Partition coefficient, from equilibrium phase diagram
+	return Cse / Cle;
 }
 
 double Q(const double p, const double Cs, const double Cl)
 {
-	//const double Qmin = 0.1;
-    //return Qmin + (1.0 - Qmin) * (1.0-p)/(1.0 + k(Cs, Cl) - (1.0-k(Cs, Cl))*p);
-    return 0.5;
+	const double Qmin = 0.01;
+    return Qmin + (1.0 - Qmin) * (1.0-p)/(1.0 + k() - (1.0-k())*p);
 }
-
-double Qprime(const double p, const double Cs, const double Cl)
-{
-    //return (-(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p)-(1.0-p)*(k(Cs, Cl)-1.0))
-    //        / pow(1.0+k(Cs, Cl) - (1.0-k(Cs, Cl))*p,2.0);
-    return 0.0;
-}
-
 
 double fl(const double c)
 {
@@ -858,7 +843,7 @@ void simple_progress(int step, int steps) {
 		std::cout<<"• "<<std::flush;
 }
 
-void export_energy()
+void export_energy(rootsolver& NRGsolver)
 {
 	const int np=100;
 	const int nc=100;
@@ -866,8 +851,6 @@ void export_energy()
 	const double dc = 1.0/nc;
 	const double pmin=-dp, pmax=1.0+dp;
 	const double cmin=-dc, cmax=1.0+dc;
-
-	rootsolver NRGsolver;
 
 	std::ofstream ef("energy.csv");
 	ef<<"p";
@@ -1075,7 +1058,7 @@ template <typename T> void interpolator::interpolate(const T& p, const T& c, T& 
 	if (p<LUTpmin || c<LUTcmin ||
 	    p>LUTpmax || c>LUTcmax)
 	{
-		printf("GSL interp2d error: phi=%.2f, c=%.2f\n", p, c);
+		printf("GSL interp2d error: phi=%.4f, c=%.4f\n", p, c);
 		std::exit(-1);
 	}
 	Cs = static_cast<T>(gsl_spline2d_eval(CSspline, p, c, xacc1, yacc1));
