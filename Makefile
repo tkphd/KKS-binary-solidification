@@ -2,27 +2,28 @@
 # GNU makefile for KKS binary phase transformation model
 # Questions/comments to trevor.keller@nist.gov (Trevor Keller)
 
-# includes
-incdir = $(MMSP_PATH)/include
+includes = -I$(MMSP_PATH)/include
 
 # compilers/flags
-compiler = icc
-flags = -O3 -Wall -I$(incdir)
+compiler = g++
 pcompiler = mpic++
-pflags = $(flags) -include mpi.h
+flags = -O3 -Wall
 
 # the program
+
 KKS: KKS.cpp
-	$(compiler) $(flags) $< -o $@ -lz -lgsl -lgslcblas -fopenmp
+	$(compiler) $(flags) $(includes) $< -o $@ -lz -lgsl -lgslcblas -fopenmp
 
 gKKS: KKS.cpp
-	g++ $(flags) $< -o $@ -lz -lgsl -lgslcblas
+	$(compiler) $(flags) $(includes) $< -o $@ -lz -lgsl -lgslcblas
 
 parallel: KKS.cpp
-	$(pcompiler) $(pflags) $< -o $@ -lz
+	$(pcompiler) $(flags) $(includes) -include mpi.h $< -o $@ -lz
+
+# utilities
 
 mmsp2pc: mmsp2pc.cpp
-	$(compiler) $(flags) $< -o $@ -lz
+	$(compiler) $(flags) $(includes) $< -o $@ -lz
 
 clean:
 	rm -f KKS gKKS parallel

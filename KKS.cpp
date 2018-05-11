@@ -25,10 +25,12 @@
 // 10-th order polynomial fitting coefficients from CALPHAD
 double calCs[11] = { 6.19383857e+03,-3.09926825e+04, 6.69261368e+04,-8.16668934e+04,
                      6.19902973e+04,-3.04134700e+04, 9.74968659e+03,-2.04529002e+03,
-                     2.95622845e+02,-3.70962613e+01,-6.12900561e+01};
+                     2.95622845e+02,-3.70962613e+01,-6.12900561e+01
+                   };
 double calCl[11] = { 6.18692878e+03,-3.09579439e+04, 6.68516329e+04,-8.15779791e+04,
                      6.19257214e+04,-3.03841489e+04, 9.74145735e+03,-2.04379606e+03,
-                     2.94796431e+02,-3.39127135e+01,-6.26373908e+01};
+                     2.94796431e+02,-3.39127135e+01,-6.26373908e+01
+                   };
 
 // Solidus and Liquidus compositions from CALPHAD
 const double Cse = 0.5413,  Cle = 0.3940;
@@ -131,8 +133,8 @@ void generate(int dim, const char* filename)
 		/* Generate Cs,Cl look-up table (LUT) using Newton-Raphson method, as
 		 * outlined in Provatas' Appendix C3 but using libgsl for speed and accuracy
 		 * Store results in pureconc, which contains two fields:
-		 * 0. Cs, fictitious composition of pure liquid
-		 * 1. Cl, fictitious composition of pure solid
+		 * 0. Cs, fictitious composition of pure solid
+		 * 1. Cl, fictitious composition of pure liquid
 		 *
 		 * The grid is discretized over phi (axis 0) and c (axis 1).
 		*/
@@ -403,9 +405,9 @@ void generate(int dim, const char* filename)
 template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int steps)
 {
 	int rank=0;
-    #ifdef MPI_VERSION
-    rank = MPI::COMM_WORLD.Get_rank();
-    #endif
+	#ifdef MPI_VERSION
+	rank = MPI::COMM_WORLD.Get_rank();
+	#endif
 
 	// Read concentration look-up table from disk, in its entirety, even in parallel. Should be relatively small.
 	#ifndef MPI_VERSION
@@ -609,17 +611,17 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 			}
 			double myu = (fl(newGrid(n)[3])-fs(newGrid(n)[2]))/(Cle - Cse);
 
-			#ifndef MPI_VERSION
-			#pragma omp critical
-			{
-			#endif
 			vmax = std::max(vmax,myv); // maximum velocity
+			                           // will collide in parallel; minimal risk
+
+			#pragma omp atomic
 			ctot += myc;               // total mass
+
+			#pragma omp atomic
 			ftot += myf;               // total free energy
+
+			#pragma omp atomic
 			utot += myu*myu;           // deviation from equilibrium
-			#ifndef MPI_VERSION
-			}
-			#endif
 
 			/* ======= *
 			 * ~ fin ~ *
@@ -656,7 +658,8 @@ template <int dim, typename T> void update(grid<dim,vector<T> >& oldGrid, int st
 } // namespace MMSP
 
 template<int dim, typename T>
-void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int rank) {
+void print_values(const MMSP::grid<dim,MMSP::vector<T> >& oldGrid, const int rank)
+{
 	double pTot=0.0;
 	double cTot=0.0;
 	unsigned int nTot = nodes(oldGrid);
@@ -834,7 +837,8 @@ double d2f_dc2(const double p, const double c, const double Cs, const double Cl)
 	return d2fl_dc2(Cl)*d2fs_dc2(Cs)*invR;
 }
 
-void simple_progress(int step, int steps) {
+void simple_progress(int step, int steps)
+{
 	if (step==0)
 		std::cout<<" ["<<std::flush;
 	else if (step==steps-1)
