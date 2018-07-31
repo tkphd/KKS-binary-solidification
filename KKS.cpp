@@ -89,26 +89,26 @@ void generate(int dim, const char* filename)
 	 * ======================================================================== */
 
 	// Consider generating a free energy plot and lookup table.
-	bool nrg_not_found=true; // set False to disable energy plot, which may save a few minutes of work
-	bool lut_not_found=true; // LUT must exist -- do not disable!
+	int nrg_not_found = int(true); // set False to disable energy plot, which may save a few minutes of work
+	int lut_not_found = int(true); // LUT must exist -- do not disable!
 	if (rank==0) {
 		if (1) {
 			std::ifstream fnrg("energy.csv");
 			if (fnrg) {
-				nrg_not_found=false;
+				nrg_not_found = int(false);
 				fnrg.close();
 			}
 			std::ifstream flut("consistentC.lut");
 			if (flut) {
-				lut_not_found=false;
+				lut_not_found = int(false);
 				flut.close();
 			}
 		}
 	}
 
 	#ifdef MPI_VERSION
-	MPI::COMM_WORLD.Bcast(&nrg_not_found,1,MPI_BOOL,0);
-	MPI::COMM_WORLD.Bcast(&lut_not_found,1,MPI_BOOL,0);
+	MPI::COMM_WORLD.Bcast(&nrg_not_found, 1, MPI_INT, 0);
+	MPI::COMM_WORLD.Bcast(&lut_not_found, 1, MPI_INT, 0);
 	MPI::COMM_WORLD.Barrier();
 	#endif
 
@@ -870,7 +870,7 @@ void export_energy(rootsolver& NRGsolver)
 		for (int j=0; j<nc+1; j++) {
 			double c = cmin+(cmax-cmin)*dc*j;
 			double cs(0.5), cl(0.5);
-			double res=NRGsolver.solve(p,c,cs,cl);
+			NRGsolver.solve(p,c,cs,cl);
 			ef << ',' << f(p, c, cs, cl);
 		}
 		ef << '\n';
