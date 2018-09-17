@@ -7,7 +7,7 @@ includes = -I$(MMSP_PATH)/include
 # compilers/flags
 compiler = g++
 pcompiler = mpic++
-flags = -O3 -Wall
+flags = -O3 -Wall -std=c++11
 
 # the program
 
@@ -18,7 +18,7 @@ gKKS: KKS.cpp
 	$(compiler) $(flags) $(includes) $< -o $@ -lz -lgsl -lgslcblas
 
 parallel: KKS.cpp
-	$(pcompiler) $(flags) $(includes) -include mpi.h $< -o $@ -lz
+	$(pcompiler) $(flags) $(includes) -include mpi.h $< -o $@ -lz -lgsl -lgslcblas
 
 # utilities
 
