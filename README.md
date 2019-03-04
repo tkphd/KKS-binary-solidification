@@ -5,7 +5,10 @@ of gamma, but requires constant chemical potential through the interface.
 The implementation involves iteratively solving for chemical composition in
 pure phases such that the chemical potential constraint is satisfied [2].
 
-Questions/comments to trevor.keller@nist.gov (Trevor Keller).
+Questions/comments to trevor.keller@nist.gov (Trevor Keller). Cite with the
+following DOI:
+
+[![DOI](https://zenodo.org/badge/59316682.svg)](https://zenodo.org/badge/latestdoi/59316682)
 
 References:
 1. Kim, Kim, and Suzuki. "Phase-field model for binary alloys."
